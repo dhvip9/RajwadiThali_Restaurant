@@ -1,0 +1,37 @@
+{
+  "id": "/",
+  "name": "Rajwadi Thali, Chaat & Sweets",
+  "short_name": "Rajwadi Thali",
+  "description": "Authentic Gujarati vegetarian dining in Fremont, CA — unlimited thalis with no sharing, Indian street chaats, fresh drinks and sweets.",
+  "lang": "en-US",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F5F0E7",
+  "theme_color": "#08080A",
+  "categories": ["food", "lifestyle"],
+  "icons": [
+    { "src": "assets/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dine-In Menu",
+      "short_name": "Menu",
+      "url": "/index.html#menu",
+      "icons": [{ "src": "assets/img/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Order Online",
+      "short_name": "Order",
+      "url": "https://order.online/business/-480570/en-US"
+    },
+    {
+      "name": "Call the restaurant",
+      "short_name": "Call",
+      "url": "tel:+15108968976"
+    }
+  ]
+}
