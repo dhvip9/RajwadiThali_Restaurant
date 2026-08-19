@@ -48,10 +48,13 @@ const SHELL = [
   'assets/css/styles.css',
   'assets/js/main.js',
   'assets/img/logo.webp',
-  /* The menu page, plus the photos it shows. It references the site's images
-     by path rather than embedding them, so it stays small and shares the cache
-     with the rest of the site — but that means the pictures have to be in the
-     shell too, or the page comes up bare with no signal. */
+  /* The menu page itself, but deliberately NOT its sixteen photos. It links
+     them by path rather than embedding, and every one of them also appears on
+     the home page — so anyone who has browsed the site already has them in the
+     runtime cache, and precaching them here would add ~500KB to the install
+     for a second copy. The trade is that a visitor whose very first action is
+     to open the menu with no signal gets the text and prices without the
+     pictures, which is the right way round for a menu. */
   'menu.html',
   'assets/img/icon-192.png',
   'assets/img/icon-512.png',
