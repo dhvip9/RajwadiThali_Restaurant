@@ -140,7 +140,20 @@ body {
   font-family: var(--font-body);
   font-size: 1.0625rem;
   line-height: 1.65;
-  -webkit-font-smoothing: antialiased;
+  /* NO -webkit-font-smoothing: antialiased.
+
+     It was here, and it is the entire reason this site's text sat lighter than
+     the catering site's. On macOS `antialiased` switches off subpixel
+     rendering, which thins every stroke — the footers were compared side by
+     side and matched on family, weight, size and colour exactly (Inter 400,
+     15.04px, #333); the only computed difference between them was this one
+     property, `auto` there against `antialiased` here.
+
+     It is declared on body, so the difference was never really a footer
+     problem — it was site-wide, and the footer is just where the two sites sit
+     close enough in layout to notice. Removing it here fixes the whole page
+     rather than patching one section into disagreeing with the paragraphs
+     above it. */
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
@@ -162,23 +175,283 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 /* ==========================================================================
-   GLASS — one class, recoloured by whichever surface it sits on
+   GLASS ENGINE — one material, three thicknesses
+   --------------------------------------------------------------------------
+   Every surface on this site already carried `.glass`, which meant a 90px
+   trust chip and a 700px FAQ panel were rendered from *identical* material.
+   That is the one thing a glass system must not do: material weight is how a
+   layered interface communicates hierarchy. A big panel is a thick piece of
+   glass — heavier frost, deeper shadow, less transparent. A small control is
+   a thin sliver — light frost, tight shadow, more transparent.
+
+   So the material is now a set of TOKENS with three tiers, and a surface
+   opts into a tier rather than redeclaring a filter. Adding a component means
+   picking a tier, not inventing new numbers.
+
+     tier 1  THIN    chips, tabs, small buttons, badges
+     tier 2  MEDIUM  cards, list panels, FAQ, notes
+     tier 3  THICK   nav, sheets, modals, the footer panel
+
+   Everything scales together across the tiers — frost, saturation, fill, rim
+   brightness, shadow depth and spread — because they are facets of one
+   physical property (thickness), not independent knobs.
+
+   Colour is NOT set here. Each tier resolves against the --s-* surface tokens,
+   which .section--dark / .section--light already re-point, so the same tier
+   reads correctly over the black hero and the cream sections without a single
+   per-section override.
    ========================================================================== */
-.glass {
+
+:root {
+  /* thickness ---------------------------------------------------------- */
+  --g1-frost: 10px;   --g1-sat: 145%;
+  --g2-frost: 20px;   --g2-sat: 165%;
+  --g3-frost: 30px;   --g3-sat: 190%;
+
+  /* how much of the surface's own fill each tier carries. Thicker glass is
+     less transparent — you see less through a thick pane, and that is what
+     makes it read as heavy rather than just blurrier. */
+  --g1-fill: .55;     --g2-fill: .80;     --g3-fill: 1;
+
+  /* rim: the lit edge. Brighter on thicker glass because a thicker edge
+     gathers more light along it. */
+  --g1-rim: .34;      --g2-rim: .52;      --g3-rim: .74;
+
+  /* ambient shadow. Depth is the other half of thickness: a thick pane sits
+     further off the page and casts further. */
+  --g1-shadow: 0 2px 8px rgba(20, 15, 5, .10);
+  --g2-shadow: 0 10px 30px rgba(20, 15, 5, .13);
+  --g3-shadow: 0 22px 60px rgba(20, 15, 5, .20);
+}
+
+/* --------------------------------------------------------------------------
+   The base. `.glass` alone stays tier 2, so every existing surface keeps
+   working untouched and only the ones that opt in change.
+   -------------------------------------------------------------------------- */
+.glass,
+.glass--thin,
+.glass--thick {
   position: relative;
   background: var(--s-glass-bg);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
   border: 1px solid var(--s-glass-border);
-  box-shadow: var(--s-glass-shadow);
   color: var(--s-fg);
+  /* tier 2 defaults */
+  --_frost: var(--g2-frost);
+  --_sat: var(--g2-sat);
+  --_rim: var(--g2-rim);
+  backdrop-filter: blur(var(--_frost)) saturate(var(--_sat));
+  -webkit-backdrop-filter: blur(var(--_frost)) saturate(var(--_sat));
+  box-shadow: var(--g2-shadow);
 }
+
+/* ==========================================================================
+   EVERY BUTTON IS CUT FROM THE SAME SHEET
+
+   main.js solves the bezel once — the same squircle profile, bevel slope and
+   light vector the nav's specular map is built from — and writes the result
+   here as --lg-rim-conic. So a button's edge is lit by the identical surface
+   model as the refracting bars: bright where the bezel faces the light, dimmer
+   down the sides, with the weaker bounce on the far edge that real glass
+   picks up from whatever the light is landing on.
+
+   What these do NOT get is the displacement lens. They sit on the flat page,
+   where a lens returns the field it was handed — invisible, and expensive
+   enough that putting one on every button is what made the site crawl. The
+   light is the part that does not need a backdrop to exist; it only needs the
+   shape. That is the whole difference between the two halves of this material,
+   and it is why the buttons still read as the same glass as the bar.
+
+   The ring is drawn with a mask rather than a border so it can sit at any
+   radius without the corner seams a 1px border shows on a pill.
+   ========================================================================== */
+.btn::before,
+.tab::before,
+.trust-item::before,
+.tab-pill::before {
+  content: ''; position: absolute; inset: 0; z-index: 0;
+  border-radius: inherit; padding: 1px; pointer-events: none;
+  background: var(--lg-rim-conic, linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.06)));
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: var(--lg-rim-strength, .7);
+  transition: opacity .25s ease;
+}
+/* the label has to clear its own rim */
+.btn > *, .tab > * { position: relative; z-index: 1; }
+/* Pressing a button turns its edge toward you: the lit arc broadens as the
+   bevel flattens against the press. One property, so it stays on the
+   compositor. */
+.btn:hover::before, .tab:hover::before { --lg-rim-strength: 1; }
+.btn:active::before, .tab:active::before { --lg-rim-strength: .45; }
+/* Gold surfaces carry their own light; a white rim on top of them reads as a
+   seam rather than an edge, so theirs is dialled back. */
+.btn-gold::before, .tab-pill::before { --lg-rim-strength: .42; }
+/* Dark glass takes a stronger rim than light glass — the same edge against a
+   darker fill has more contrast to spend. */
+.section--dark .btn::before,
+.section--dark .tab::before,
+.hero-glass .trust-item::before { --lg-rim-strength: .85; }
+
+/* ==========================================================================
+   GLASS INSIDE GLASS DOES NOT FILTER TWICE
+
+   A surface sitting on another glass surface has, as its backdrop, the parent's
+   already-filtered output. Blurring that again is very nearly idempotent —
+   30px of blur followed by 10px more is 32px of blur, a difference nobody can
+   see — while forcing a second backdrop root and an extra render surface for
+   the compositor to manage. Nesting backdrop filters is also the case engines
+   handle least reliably, which is the more important half: it is where wrong
+   output comes from, not just slow output.
+
+   So the inner surfaces keep their fill and their tint, which is what actually
+   distinguishes them from the pane they sit on, and drop the blur their parent
+   has already applied on their behalf.
+   ========================================================================== */
+.hero-glass .btn-outline,
+.hero-glass .trust-item,
+.a11y-panel .a11y-head {
+  backdrop-filter: saturate(145%);
+  -webkit-backdrop-filter: saturate(145%);
+}
+
+/* ==========================================================================
+   NO BLUR WHERE THERE IS NOTHING TO BLUR
+
+   A Gaussian blur of a uniform field is that field. It is not an approximation
+   — convolving a constant with a normalised kernel returns the constant — and
+   a blur of a LINEAR ramp is likewise the same ramp. So on a surface whose
+   whole backdrop is one flat section colour, or the broad 900px radial and the
+   two-level linear gradient the light sections carry, `blur(20px)` is
+   arithmetically a no-op. It produces the pixels that were already there.
+
+   It is not a no-op to render. Every one of these elements forces a backdrop
+   root, snapshots what is under it and runs a 20–30px separable convolution
+   over the whole box, every frame it moves. Measured on this page: 35
+   backdrop-filtered elements totalling 4.66 MILLION pixels, about 4.6 times
+   the viewport, and roughly 3.8M of that was these — the thali cards alone
+   890k, the FAQ panel 869k, the footer 707k. That is the lag, and it predates
+   the lens by a long way; the nav's refraction is 115k of the total, under
+   three percent.
+
+   The saturation stays: that one is a per-pixel colour transform with no
+   kernel, it is cheap, and it is doing visible work — it is what keeps these
+   surfaces warmer than the page behind them.
+
+   The surfaces that sit on a PHOTOGRAPH — .hero-glass and its chips — are
+   deliberately not in this list. Their backdrop has real detail at the blur's
+   scale, so for them the blur is the effect and it stays. */
+.card, .thali, .review, .menu-item, .faq, .notes {
+  backdrop-filter: saturate(165%);
+  -webkit-backdrop-filter: saturate(165%);
+}
+.glass--thin {
+  --_frost: var(--g1-frost);
+  --_sat: var(--g1-sat);
+  --_rim: var(--g1-rim);
+  box-shadow: var(--g1-shadow);
+}
+.glass--thick {
+  --_frost: var(--g3-frost);
+  --_sat: var(--g3-sat);
+  --_rim: var(--g3-rim);
+  box-shadow: var(--g3-shadow);
+}
+
+/* --------------------------------------------------------------------------
+   THE LIT EDGE
+   A graded rim, not an even one — the same reasoning as the nav and the
+   selection drop. An even ring of brightness reads as a *border*; light that
+   lands on the top-left, skips the sides and returns weaker underneath reads
+   as a lit *edge*. Drawn on ::before so it is independent of the surface's own
+   background, and masked to the padding ring so only the stroke shows.
+
+   Surfaces that already draw their own ::before opt out with .glass--norim.
+   -------------------------------------------------------------------------- */
+.glass:not(.glass--norim)::before,
+.glass--thin:not(.glass--norim)::before,
+.glass--thick:not(.glass--norim)::before {
+  content: ''; position: absolute; inset: 0; z-index: 0;
+  border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from 208deg,
+    rgba(255, 255, 255, var(--_rim)) 0deg,
+    rgba(255, 255, 255, calc(var(--_rim) * .16)) 68deg,
+    rgba(255, 255, 255, calc(var(--_rim) * .10)) 152deg,
+    rgba(255, 255, 255, calc(var(--_rim) * .42)) 212deg,
+    rgba(255, 255, 255, calc(var(--_rim) * .14)) 300deg,
+    rgba(255, 255, 255, var(--_rim)) 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+/* content must sit above the rim layer */
+.glass > *, .glass--thin > *, .glass--thick > * { position: relative; z-index: 1; }
+
+/* --------------------------------------------------------------------------
+   TIER ASSIGNMENTS — the whole site, by size and role
+   -------------------------------------------------------------------------- */
+
+/* thin: things you tap, not things you read */
+.tab, .trust-item, .page-back, .btn-outline,
+.mobile-cta-alt, .footer-soc, .allergen-tags li {
+  --_frost: var(--g1-frost); --_sat: var(--g1-sat); --_rim: var(--g1-rim);
+}
+/* thick: chrome and anything modal */
+.nav-liquid, .footer-panel, .a11y-panel, .hero-glass, .mobile-cta, .nav-mobile {
+  --_frost: var(--g3-frost); --_sat: var(--g3-sat); --_rim: var(--g3-rim);
+}
+
+/* the trust chips sit ON the hero glass — a light surface on another light
+   surface is the one stack that destroys legibility, so they stay thin and
+   lean on their border rather than adding a second frost */
+.trust-item { box-shadow: var(--g1-shadow); }
+
+/* --------------------------------------------------------------------------
+   ELEVATION ON INTERACTION
+   Lifting a card should thicken it, not just move it: the pane comes toward
+   you, so its shadow spreads and its rim catches more light. One transition,
+   compositor-friendly properties only.
+   -------------------------------------------------------------------------- */
+.card, .thali, .review {
+  transition: transform .38s var(--ease-spring), box-shadow .38s var(--ease-spring);
+}
+.card:hover, .thali:hover {
+  box-shadow: var(--g3-shadow);
+  --_rim: var(--g3-rim);
+}
+
+/* --------------------------------------------------------------------------
+   ACCESSIBILITY — the tiers collapse, they do not linger
+   Both OS signals and the panel's own contrast step flatten every tier to a
+   solid surface. Written once here rather than per component, which is the
+   point of having tiers at all.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass--thin, .glass--thick {
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  }
+  .glass::before, .glass--thin::before, .glass--thick::before { opacity: .35; }
+}
+@media (prefers-contrast: more) {
+  .glass::before, .glass--thin::before, .glass--thick::before { display: none; }
+}
+html[data-a11y-contrast="2"] :is(.glass, .glass--thin, .glass--thick) {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}
+html[data-a11y-contrast="2"] :is(.glass, .glass--thin, .glass--thick)::before { display: none; }
+/* "Hide images" is about photography and decoration; the rim is neither, but
+   the noise overlays are */
+html.a11y-noimg :is(.nav-noise, .card-noise, .hero-noise) { display: none !important; }
+
 /* gold glass — identical to catering's .glass-gold */
 .glass-gold {
   position: relative;
   background: var(--gold-fill);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  /* No blur, for the same reason as the panel it sits inside: --gold-fill is a
+     near-solid wash, and the one on the footer is nested INSIDE .footer-panel,
+     which is itself a backdrop-filtered surface. A backdrop filter whose
+     backdrop is another backdrop filter is the case engines handle worst, and
+     here it was doing it to sample a colour already hidden behind gold. */
+  backdrop-filter: saturate(180%);
+  -webkit-backdrop-filter: saturate(180%);
   border: 1px solid rgba(255, 235, 190, .55);
   box-shadow: 0 8px 28px rgba(184, 122, 37, .35), inset 0 1px 0 rgba(255, 255, 255, .5);
   color: var(--gold-ink-on-fill);
@@ -400,14 +673,23 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   --nav-border-strong: rgba(255, 255, 255, .85);
   --nav-active-bg: transparent;   /* 100% — the drop is refraction and rim only */
   --nav-hover-bg: rgba(255, 255, 255, .12);
-  --nav-text-shadow: 0 1px 8px rgba(0, 0, 0, .35);
+  /* Two layers, not one: a tight shadow for edge definition against whatever
+     the lens is bending underneath, and a wider soft one for separation. With
+     no frost to flatten the backdrop, this is what carries the labels. */
+  --nav-text-shadow: 0 1px 2px rgba(0, 0, 0, .95), 0 2px 10px rgba(0, 0, 0, .75);
+  --nav-ico-shadow: 0 1px 2px rgba(0, 0, 0, .8);
   /* The bar is a lens, not a lid. At .62 it hid whatever it passed over,
      which wastes the refraction entirely — you cannot see a bend in something
      you cannot see through. Legibility comes from frost and this fill, never
      from a brightness term; see the note on --nav-frost below. */
-  --nav-glass-bg: rgba(16, 16, 20, .34);
+  /* .44, up from .34. The lens traded frost for clarity — the whole point of
+     it — and clarity is exactly what a label has to survive. The fill is the
+     only term that dims without destroying (see the note against brightness()
+     below), so the legibility the blur used to provide comes from here now. */
+  --nav-glass-bg: rgba(16, 16, 20, .44);
   --nav-glass-border: rgba(255, 255, 255, .18);
   --nav-tagline: #f7ebd2;
+  --logo-seat: 0 1px 2px rgba(0, 0, 0, .7);
   /* NO brightness()/contrast() here, deliberately. Using them to dim was the
      mistake that made this bar opaque-looking: brightness() CLIPS — with a
      1.42 lift every backdrop pixel above ~0.70 luminance saturates to pure
@@ -417,6 +699,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
      scrolling past. Frost (blur) mutes, fill dims, refraction separates —
      which is Apple's own order. */
   --nav-frost: 14px;
+  /* lighter than --nav-frost: see the note on #nav.lg-lensed. Dark glass hides
+     its backdrop more cheaply than light glass does, so it needs less. */
+  --nav-lens-frost: 6px;
   --nav-sat: 190%;
   /* dark glass: a bright rim reads strongly, and the sky-catch is generous */
   --nav-rim-bounce: rgba(255, 255, 255, .34);
@@ -428,19 +713,24 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   --nav-border-strong: rgba(255, 255, 255, .9);
   --nav-active-bg: transparent;   /* 100% — the drop is refraction and rim only */
   --nav-hover-bg: rgba(212, 155, 58, .1);
-  --nav-text-shadow: 0 1px 2px rgba(255, 255, 255, .55);
+  --nav-text-shadow: 0 1px 2px rgba(255, 255, 255, 1), 0 2px 10px rgba(255, 255, 255, .9);
+  /* dark glyphs on light glass: the halo is white, so it spreads rather than
+     outlines, and the glyph needs its own soft dark seat underneath */
+  --nav-ico-shadow: 0 1px 2px rgba(255, 255, 255, .95);
   /* white glass, where catering has cream — this is the differentiator.
      Was .9, which is a lid: the thalis behind it washed out to bare white and
      the refraction had nothing to refract. */
-  --nav-glass-bg: rgba(255, 255, 255, .34);
+  --nav-glass-bg: rgba(255, 255, 255, .46);
   --nav-glass-border: rgba(212, 155, 58, .34);
   --nav-tagline: var(--gold-ink);
+  --logo-seat: 0 1px 2px rgba(255, 255, 255, .9);
   /* The light bar sits over cards full of dark body copy, which is the hard
      case: that text has to stop competing with the nav labels without being
      erased. FROST does that job — a heavier blur turns the paragraph behind
      into soft tone and colour while keeping it visibly present, which is what
      reads as glass. The fill then lifts it just enough for dark labels. */
   --nav-frost: 20px;
+  --nav-lens-frost: 7px;
   --nav-sat: 165%;
   /* light glass: the same sheen would just look like fog, so it is halved and
      the bounce leans gold, which is where this bar's light actually comes from */
@@ -452,11 +742,24 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .logo-link { display: flex; align-items: center; text-decoration: none; }
 .logo-chip { display: flex; align-items: center; }
 #nav .logo-chip, .nav-mobile .logo-chip { flex-direction: column; align-items: center; gap: 3px; }
-.logo-img { height: 56px; width: auto; display: block; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .25)); }
+/* The wordmark is a flat image with no outline of its own, so on glass it had
+   nothing separating it from whatever passed behind. Two shadows rather than
+   one: a tight dark seat that traces the letterforms, and the original soft
+   one for depth. --logo-seat flips per theme, because on white glass a black
+   halo is what reads and on dark glass it is a white one. */
+.logo-img {
+  height: 56px; width: auto; display: block;
+  filter:
+    drop-shadow(var(--logo-seat, 0 1px 1px rgba(0, 0, 0, .55)))
+    drop-shadow(0 2px 8px rgba(0, 0, 0, .3));
+}
 .logo-tagline {
   font-family: var(--font-label);
-  font-size: .58rem; font-weight: 600; letter-spacing: .34em; text-transform: uppercase;
+  /* 700 and a hair more size: at .58rem with .34em tracking this is the
+     smallest type on the bar, sitting on the most active part of the glass. */
+  font-size: .6rem; font-weight: 700; letter-spacing: .32em; text-transform: uppercase;
   color: var(--nav-tagline); line-height: 1;
+  text-shadow: var(--nav-text-shadow);
   text-align: center; text-indent: .34em; white-space: nowrap;
   transition: color .35s ease;
 }
@@ -481,12 +784,23 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   position: relative; z-index: 2;
   display: flex; align-items: center; gap: 8px;
   padding: 12px 14px; border-radius: 28px;
-  font-size: .96rem; font-weight: 650; letter-spacing: -.01em;
-  color: var(--nav-fg-dim); text-decoration: none;
+  /* 800, and the FULL ink rather than --nav-fg-dim. A dimmed label is a fine
+     idea on a solid bar, where the only thing it competes with is the active
+     item; on glass it competes with whatever is scrolling past underneath,
+     and .72 alpha over a moving photograph is not a colour, it is a
+     suggestion. The active item still reads as active — it keeps the drop
+     behind it, which is a stronger signal than a 20% ink difference. */
+  font-size: .96rem; font-weight: 800; letter-spacing: -.005em;
+  color: var(--nav-fg); text-decoration: none;
   text-shadow: var(--nav-text-shadow);
   transition: color .2s ease, background-color .2s ease, transform 120ms ease-out;
 }
-.nav-link:hover { background: var(--nav-hover-bg); color: var(--nav-fg); }
+/* NO hover background. The drop springs to whatever link the pointer enters,
+   so a fill here paints a SECOND translucent shape underneath it — two stacked
+   glass surfaces on one item, which is both wrong physically and muddier than
+   either alone. The drop is the hover indicator; the link only changes ink.
+   (.nav-mobile-link keeps its fill: that sheet has no drop.) */
+.nav-link:hover { color: var(--nav-fg); }
 .nav-link:active { transform: scale(.97); }
 .nav-link.active { color: var(--nav-fg); }
 /* A link's name is one control's label, so it never wraps. Without this the
@@ -496,7 +810,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    Forbidding the wrap is what lets the bar detect that it is out of room, and
    the icon drop further down is what then buys the room back. */
 .nav-link .nav-label { white-space: nowrap; }
-.nav-ico { display: flex; width: 22px; height: 22px; flex: 0 0 auto; opacity: .9; }
+/* Full opacity, and the label's own shadow carried onto the glyph. Below
+   ~1300px the labels drop and these icons ARE the navigation, so anything that
+   weakens them weakens the whole bar at exactly the width where the bar is
+   tightest. */
+.nav-ico {
+  display: flex; width: 22px; height: 22px; flex: 0 0 auto; opacity: 1;
+  filter: drop-shadow(var(--nav-ico-shadow, 0 1px 2px rgba(0, 0, 0, .55)));
+}
 .nav-ico svg { width: 100%; height: 100%; display: block; }
 
 /* ---- right cluster: CTA + hamburger ---- */
@@ -544,15 +865,18 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .nav-mobile.nav-theme-light { --nav-glass-bg: rgba(255, 255, 255, .98); }
 
 .nav-mobile-links { display: flex; flex-direction: column; }
+/* The same reasoning as .nav-link: 500 at --nav-fg-dim was a weight chosen for
+   a solid sheet, and this one is glass over body copy. Full ink, 650, so the
+   sheet's items read as items and not as watermarks. */
 .nav-mobile-link {
   display: flex; align-items: center; gap: 12px;
-  color: var(--nav-fg-dim); text-decoration: none; padding: 14px 16px; border-radius: 14px;
-  font-size: .98rem; font-weight: 500; min-height: 48px;
+  color: var(--nav-fg); text-decoration: none; padding: 14px 16px; border-radius: 14px;
+  font-size: .98rem; font-weight: 650; min-height: 48px;
   transition: color .3s ease, background .3s ease;
 }
 .nav-mobile-link .nav-ico { width: 20px; height: 20px; display: flex; flex-shrink: 0; flex-basis: 20px; }
 .nav-mobile-link:hover { background: var(--nav-hover-bg); color: var(--nav-fg); }
-.nav-mobile-link.active { color: var(--gold-ink); background: rgba(212, 155, 58, .16); font-weight: 600; }
+.nav-mobile-link.active { color: var(--gold-ink); background: rgba(212, 155, 58, .16); font-weight: 750; }
 .nav-theme-dark .nav-mobile-link.active { color: var(--gold-light); }
 .nav-mobile-chev { margin-left: auto; width: 18px; height: 18px; display: flex; color: var(--nav-fg-dim); opacity: .6; }
 .nav-mobile-chev svg { width: 100%; height: 100%; }
@@ -618,6 +942,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   display: flex; flex-wrap: wrap; justify-content: center; gap: 14px;
 }
 .trust-item {
+  position: relative;
   flex: 0 0 148px; box-sizing: border-box;
   padding: 14px 12px; text-align: center; color: var(--white);
   border-radius: 16px; text-decoration: none;
@@ -671,7 +996,59 @@ a.trust-item:hover { transform: translateY(-3px); }
 /* ==========================================================================
    MENU
    ========================================================================== */
-.tabs { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 48px; }
+/* ---- the category strip is a SIDE SCROLLER ----
+   Wrapping put "Chaats" and "Drinks & Sweets" onto a second, shorter row
+   centred under the first, which reads as two groups rather than one list and
+   moves every pill's position each time a label changes length. A single row
+   that scrolls keeps the order flat and the geometry stable.
+
+   `safe center` is the important word. Plain `justify-content: center` centres
+   overflowing content by pushing it equally past BOTH edges, and the part that
+   goes past the start edge cannot be scrolled back to — it is simply
+   unreachable. `safe` means "centre while it fits, fall back to start
+   alignment when it does not", which is exactly the behaviour a scroller
+   needs. Browsers without it fall back to plain `center`, so the rule is
+   repeated the other way round below for them.
+
+   The vertical padding is not decoration: overflow-x:auto forces overflow-y to
+   compute to auto as well, so without room inside the scroll box the gold
+   pill's drop shadow would be sliced off at the top and bottom. */
+.tabs {
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  justify-content: safe center;
+  gap: 8px;
+  padding: 12px 22px;
+  margin-bottom: 36px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* the strip animates its own scrolling; main.js only ever assigns a position */
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 22px;
+  /* the strip is a tablist; its own scrollbar is noise on top of that */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Fade the ends so it is visibly a strip that continues, rather than one
+     that has been cut off. Masked rather than drawn with a gradient overlay so
+     the fade sits above the pills without needing a stacking context of its
+     own or intercepting the drag. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+.tabs::-webkit-scrollbar { display: none; }
+/* never let a pill shrink to fit: a scroller's items keep their natural width */
+.tab { flex: 0 0 auto; scroll-snap-align: center; }
+/* A strip that fits needs no fade and no snap — both only ever get in the way
+   when there is nothing to scroll. */
+@media (min-width: 900px) {
+  .tabs:not(.is-scrollable) {
+    -webkit-mask-image: none; mask-image: none;
+    scroll-snap-type: none;
+  }
+}
 .tab-pill {
   position: absolute; z-index: 0; left: 0; top: 0; border-radius: 999px;
   background: var(--gold-fill);
@@ -689,8 +1066,9 @@ a.trust-item:hover { transform: translateY(-3px); }
   font-family: var(--font-label);
   font-size: 0.875rem; font-weight: 500; color: var(--s-fg-dim);
   background: var(--s-chip-bg);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  /* tier 1 via the engine, not a literal — a chip is thin glass */
+  backdrop-filter: blur(var(--g1-frost)) saturate(var(--g1-sat));
+  -webkit-backdrop-filter: blur(var(--g1-frost)) saturate(var(--g1-sat));
   border: 1px solid var(--s-chip-border);
   padding: 11px 20px; border-radius: 999px;
   transition: color .22s ease, background-color .22s ease, border-color .22s ease, transform 120ms ease-out;
@@ -880,8 +1258,13 @@ body > footer {
   padding: 56px 56px 24px; border-radius: 34px; isolation: isolate;
   color: var(--charcoal);
   background: linear-gradient(150deg, rgba(255, 255, 255, .92), rgba(245, 239, 229, .86));
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  /* NO BLUR — see "no blur where there is nothing to blur" above. This is the
+     biggest pane on the page at ~707,000px, it sits on flat footer cream, AND
+     its own fill is 92% opaque white, so the 30px convolution underneath was
+     running over a backdrop that was both featureless and almost entirely
+     hidden. Three reasons it could not show, one large bill every frame. */
+  backdrop-filter: saturate(var(--g3-sat));
+  -webkit-backdrop-filter: saturate(var(--g3-sat));
   border: 1px solid rgba(212, 155, 58, .32);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 22px 60px rgba(120, 90, 40, .13);
 }
@@ -1170,6 +1553,17 @@ a.footer-rest-cta:hover .footer-rest-arrow { transform: translateX(3px); transit
        nav has none: it clips the backdrop to flat white instead of veiling it */
     backdrop-filter: blur(var(--bar-frost, 20px)) saturate(var(--bar-sat, 180%));
     -webkit-backdrop-filter: blur(var(--bar-frost, 20px)) saturate(var(--bar-sat, 180%));
+  }
+  /* Lensed: clear centre, all the optics at the edge — the same profile as the
+     top bar. The frost goes entirely, because refraction and frost are
+     alternative ways of saying glass and blur softens the bend away. */
+  .mobile-cta.lg-lensed {
+    /* blur first, then bend — the same order and for the same reason as
+       #nav.lg-lensed. A touch more frost than the top bar carries: this one
+       spends its whole life over body copy rather than over photographs, and
+       paragraph text is the hardest thing to sit a transparent surface on. */
+    backdrop-filter:
+      blur(var(--bar-lens-frost, 7px)) saturate(var(--bar-sat, 180%)) var(--lg-url, opacity(1));
     transition: background-color .45s ease;
   }
   /* the bar is light like the page; it only darkens while it overlaps a hero */
@@ -1178,6 +1572,7 @@ a.footer-rest-cta:hover .footer-rest-arrow { transform: translateX(3px); transit
     --bar-bg: rgba(252, 249, 243, .46);
     --bar-fade: rgba(252, 249, 243, 0);
     --bar-frost: 24px;      /* heavier frost: it sits over body copy */
+    --bar-lens-frost: 7px;  /* lensed, the bend does part of that work */
     --bar-sat: 165%;
   }
   /* hairline of light along the top edge, as on .nav-liquid — where the
@@ -1304,7 +1699,7 @@ a.footer-rest-cta:hover .footer-rest-arrow { transform: translateX(3px); transit
    ACCESSIBILITY
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
+  html, .tabs { scroll-behavior: auto; }
   *, *::before, *::after {
     animation-duration: .001ms !important; animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
@@ -1663,6 +2058,64 @@ html[data-a11y-contrast="2"] :is(.section--light, body > footer) {
 }
 /* backdrop-filter over photography is where contrast actually dies — at the
    maximum step the glass goes solid and the decorative wash goes away */
+/* ==========================================================================
+   SURFACE OPACITY — the accessibility panel's "Surface opacity" stepper
+
+   This site is made of glass, and glass is the first thing to go wrong for a
+   reader who needs contrast: every panel carries whatever is behind it, at
+   whatever contrast that happens to give. The other controls treat symptoms —
+   this one removes the cause, by filling the surfaces in until they are just
+   opaque panels with text on them.
+
+   It works by putting a page-coloured base UNDER each surface's own fill.
+   Every glass surface paints a translucent gradient, and a gradient is a
+   background-IMAGE; background-color is a separate longhand that sits beneath
+   it. So raising the base's alpha makes the surface progressively solid
+   without touching a single one of the fills, borders, rims or shadows that
+   give the site its shape — nothing is overridden, something is added behind.
+
+   Two colours, because the site has two grounds: page cream for everything on
+   a light section, and near-black for the bars and panels that sit on the
+   hero. At the last step the backdrop filters come off entirely, since a
+   surface nothing shows through has nothing left to filter — so the most
+   accessible setting is also the cheapest one to render.
+   ========================================================================== */
+html[data-a11y-opacity="1"] { --a11y-opq: .25; }
+html[data-a11y-opacity="2"] { --a11y-opq: .5; }
+html[data-a11y-opacity="3"] { --a11y-opq: .75; }
+html[data-a11y-opacity="4"] { --a11y-opq: 1; }
+
+html[data-a11y-opacity] :is(
+  .glass, .glass--thin, .glass--thick, .glass-gold,
+  .card, .thali, .review, .menu-item, .faq, .notes,
+  .footer-panel, .footer-cta, .tab, .trust-item,
+  .nav-liquid, .nav-mobile, .mobile-cta, .a11y-panel, .a11y-head, .page-back
+) {
+  background-color: rgba(245, 240, 231, var(--a11y-opq, 0));
+}
+/* the dark ground: the bars over the hero, the hero panel itself, and any
+   glass sitting inside a dark section */
+html[data-a11y-opacity] :is(
+  .hero-glass, .hero-glass .trust-item,
+  .nav-liquid.nav-theme-dark, .nav-mobile.nav-theme-dark,
+  .mobile-cta.bar-dark, .section--dark .glass, .section--dark .tab
+) {
+  background-color: rgba(14, 14, 17, var(--a11y-opq, 0));
+}
+/* Fully solid: nothing shows through, so nothing needs filtering. */
+html[data-a11y-opacity="4"] :is(
+  .glass, .glass--thin, .glass--thick, .glass-gold,
+  .card, .thali, .review, .menu-item, .faq, .notes,
+  .footer-panel, .footer-cta, .tab, .trust-item, .hero-glass,
+  .nav-liquid, .nav-mobile, .mobile-cta, .a11y-panel, .a11y-head, .page-back
+) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* The lens has nothing left to bend either, so the refraction comes off with
+   it — main.js keeps its own maps, it is only the material that is switched. */
+html[data-a11y-opacity="4"] .lg-lensed { --lg-url: opacity(1); }
+
 html[data-a11y-contrast="2"] :is(.glass, .footer-panel, .tab, .nav-liquid, .nav-mobile, .a11y-panel, .a11y-head, .a11y-btn) {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
@@ -1890,12 +2343,60 @@ html[data-a11y-text] :is(#nav, .nav-mobile) .logo-tagline { font-size: 9.28px; }
    would take the blur down with it). Blur drops from 26px to 13px here on
    purpose: refraction you cannot see through is just noise, so the material
    gets its depth from the bend and the highlights instead of from fog. */
-/* Lensed: the refraction replaces most of the frost, because a bent backdrop
-   already reads as glass and heavy blur would only throw the bend away. */
+/* Lensed: refraction AND frost, in that order. */
 #nav.lg-lensed {
-  backdrop-filter: url(#lgNavLens) blur(calc(var(--nav-frost, 16px) * .45)) saturate(var(--nav-sat, 180%));
-  -webkit-backdrop-filter: blur(var(--nav-frost, 16px)) saturate(var(--nav-sat, 180%));
+  /* This rule used to carry no blur at all, on the argument that frost and
+     refraction are alternative ways to say "glass" and mixing them wastes
+     both. Held up against the actual reference bar, that is simply not what
+     the material does: in every one of those screenshots the backdrop is
+     unreadable — soft colour and gross shape only — and the mirrored band at
+     the edge is a mirror of ALREADY BLURRED content. It is frosted glass with
+     a thick edge, not a clear lens.
+
+     Order matters, and the order is BLUR FIRST, then bend. Written the other
+     way round the blur lands on top of the fold and erases the one thing the
+     fold is for: the mirrored band goes soft enough to disappear, and all that
+     is left is a frosted strip. Blurring first hands the displacement an
+     already-soft image to warp, and a warp of something soft still folds —
+     which is exactly what the reference shows, a mirrored ghost with no sharp
+     detail in it.
+
+     It is also the right way round physically. The scattering is the glass's,
+     and the light meets it on the way through; the surface that bends the
+     image is the one it leaves by. Bending before scattering would put the
+     surface on the wrong side of the pane.
+
+     The frost is lighter than the unlensed value — the bend is doing part of
+     the work of hiding the backdrop, so the blur does not have to do all of
+     it, and a lighter blur leaves the edge band legible as an edge. */
+  backdrop-filter:
+    blur(var(--nav-lens-frost, 6px)) saturate(var(--nav-sat, 180%)) var(--lg-url, opacity(1));
+  -webkit-backdrop-filter:
+    blur(var(--nav-frost, 16px)) saturate(var(--nav-sat, 180%));
 }
+
+/* ---- what the lens REPLACES ----
+   These three layers — the broad sheen, the diagonal streak, and most of the
+   painted rim — are all one thing: a guess at where light would land, drawn by
+   hand because nothing in the stylesheet knew the shape of the glass. The
+   filter knows now. Its specular map is built from the same surface profile
+   the refraction uses, so the highlight sits exactly where the bezel is steep
+   and turned toward the light, and it moves when the bar resizes because it is
+   derived rather than placed.
+
+   Leaving both switched on does not add up to more glass, it subtracts: the
+   painted layers are flat white over the very band where the fold happens, and
+   they wash the mirrored edge back out to nothing. That is why the bend kept
+   reading as weaker than the maps said it was.
+
+   Only under .lg-lensed. Safari and Firefox never get the filter, so for them
+   these layers are still the whole effect and they stay exactly as they were. */
+#nav.lg-lensed .nav-sheen,
+#nav.lg-lensed::after { display: none; }
+/* the conic ring stays, at a whisper: it carries the bar's outline where the
+   specular falls off, on the shaded side away from the light */
+#nav.lg-lensed::before { opacity: .5; }
+
 /* The mobile sheet is a MENU, not a lens: a modal task over arbitrary content
    that simply has to be read, so it keeps its near-opaque fill and a modest
    frost. Both theme classes are named because the theme rules that set these
@@ -1903,6 +2404,30 @@ html[data-a11y-text] :is(#nav, .nav-mobile) .logo-tagline { font-size: 9.28px; }
    the bar's much heavier frost. */
 .nav-mobile.nav-theme-dark,
 .nav-mobile.nav-theme-light { --nav-frost: 12px; --nav-sat: 150%; }
+
+/* ---- THE LENSED MATERIAL, FOR EVERY SURFACE THAT EARNS ONE ----
+   main.js writes --lg-url onto an element once it has measured it and the
+   cache has handed it a filter that fits. The reference lives on the ELEMENT
+   rather than in a selector here, because which filter a surface wants is a
+   fact about how big it currently is — two chips the same size share one, and
+   a surface that reflows onto a new size picks up a new one without this
+   stylesheet knowing anything about it.
+
+   The fallback matters. A custom property that has not been set makes the
+   whole declaration invalid at computed-value time, which would take the blur
+   and the saturate down with it and leave the surface as plain glassless
+   colour — so --lg-url falls back to opacity(1), a filter function that does
+   nothing, and the frost survives on its own until the lens arrives.
+
+   Blur first, then bend: same order and same reason as the bars. */
+.page-back.lg-lensed {
+  backdrop-filter:
+    blur(var(--lg-frost, 8px)) saturate(var(--lg-sat, 170%)) var(--lg-url, opacity(1));
+  -webkit-backdrop-filter: blur(var(--lg-frost, 8px)) saturate(var(--lg-sat, 170%));
+}
+/* Floats over whatever the reader has scrolled to, and it is thin, so the
+   fold across its top and bottom edge is most of what you see of it. */
+.page-back.lg-lensed { --lg-frost: 10px; --lg-sat: 165%; }
 
 /* ---- pointer-tracked light ----
    §12: light is what tells you a surface is a material rather than a colour.

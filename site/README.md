@@ -157,7 +157,7 @@ and the page behind is locked from scrolling while it is open.
 | | Before | Now |
 |---|---|---|
 | Headline | "Authentic Gujarati Flavors" | "Authentic Gujarati & North Indian Dining for *Every Appetite*" |
-| Sub-line | "Unlimited thalis, Indian street chaats and fresh sweets — served the way they are at home in Surat." | "Experience unlimited Gujarati thalis, Indian street chaats, and fresh sweets — handcrafted daily with authentic spices and served with warm hospitality, right here in Fremont." |
+| Sub-line | "Unlimited thalis, Indian street chaats and fresh sweets — served the way they are at home in Surat." | "Experience Unlimited Gujarati thalis, Indian street chaats, and fresh sweets — handcrafted daily with authentic spices and served with warm hospitality, right here in Fremont." |
 | Secondary button | `Call (510) 896-8976` | `Visit Us` → `#contact` |
 
 The headline mirrors catering's, including the `<em>` on the closing phrase:
@@ -174,7 +174,7 @@ colour site-wide. At the panel's maximum contrast step it brightens to `#FFD98A`
 rather than washing out.
 
 **"Appetite" is the word I chose** for the blank — it's the
-most restaurant-specific option and it carries the unlimited-thali positioning.
+most restaurant-specific option and it carries the Unlimited-thali positioning.
 "Every Craving", "Every Table" and "Every Occasion" all fit the same slot if you
 prefer one of those.
 
@@ -288,17 +288,17 @@ than added as chips, so the chip row still matches.
 The four placeholder questions are gone. Fourteen new ones, every answer grounded
 in your actual menu and policies:
 
-1. What is an unlimited Gujarati thali?
-2. How much does the unlimited thali cost? *(all three prices)*
+1. What is an Unlimited Gujarati thali?
+2. How much does the Unlimited thali cost? *(all three prices)*
 3. Difference between Silver, Platinum and Executive?
 4. Do you have Jain and vegan options?
 5. Is all of your food vegetarian?
-6. Can two people share one unlimited thali? *(your no-sharing rule)*
-7. Can I take unlimited thali leftovers home? *(TOGO not allowed)*
+6. Can two people share one Unlimited thali? *(your no-sharing rule)*
+7. Can I take Unlimited thali leftovers home? *(TOGO not allowed)*
 8. Do you offer takeout or delivery?
 9. Do you have a kids menu?
 10. What are your most popular dishes?
-11. Is there a service charge for large groups? *(15% for 5+)*
+11. Is there a service / gratuity charge for large groups? *(15% for 5+)*
 12. Do you handle food allergies?
 13. Where are you located?
 14. Do you cater parties and events? *(cross-links to rajwadicatering.com)*
@@ -312,7 +312,7 @@ SEO work beyond the copy:
 - **`rel="canonical"`** on both pages.
 - Visible heading is now "Frequently Asked Questions" rather than "FAQ" — the
   phrase people actually search.
-- Question wording front-loads real search phrases ("unlimited Gujarati thali",
+- Question wording front-loads real search phrases ("Unlimited Gujarati thali",
   "Jain and vegan", "kids menu", "takeout or delivery").
 - The catering cross-link and the two allergens links strengthen internal linking
   across the pair of sites.
@@ -391,7 +391,7 @@ all `noindex, follow` (useful to visitors, not search results):
 | Page | Covers |
 |---|---|
 | `privacy.html` | That there is no form, account or tracking cookie on this site; server logs; Google Fonts; what leaving the site to DoorDash / Maps / social means; what we do with a phone call or email |
-| `terms.html` | Site use, prices excluding tax, availability changes, **the unlimited-thali house rules** (no sharing, no waste, dine-in only, 15% for 5+), DoorDash's terms governing online orders, allergen responsibility, California governing law |
+| `terms.html` | Site use, prices excluding tax, availability changes, **the Unlimited-thali house rules** (no sharing, no waste, dine-in only, 15% for 5+), DoorDash's terms governing online orders, allergen responsibility, California governing law |
 | `accessibility.html` | What is actually built in, the three system preferences honoured, **where the site falls short**, WCAG 2.1 AA as a self-assessment, and how to report a barrier |
 
 Two things worth knowing about how I wrote these:
@@ -553,7 +553,7 @@ EOF
 
 ## Menu and card layout
 
-- **Equal-height cards.** Best sellers, unlimited thali cards and review cards
+- **Equal-height cards.** Best sellers, Unlimited thali cards and review cards
   all use `align-items: stretch` with the card as a flex column and one child
   set to `flex: 1 1 auto` to absorb the difference — `.card-text`,
   `.thali-items`, `.review blockquote`. That is what lets an 11-item Silver
@@ -746,7 +746,7 @@ they are far better at reading facts than inferring them from layout.
 - **`llms.txt`** — a plain-Markdown brief at the site root: key facts, all three
   thalis with their contents, every menu section with prices, the thali rules,
   takeout policy, allergens, and a short "notes for assistants" block flagging
-  that prices exclude tax, that "unlimited" never applies to takeout, and that
+  that prices exclude tax, that "Unlimited" never applies to takeout, and that
   opening hours are not published so people should call.
 - **`robots.txt` explicitly allows** GPTBot, OAI-SearchBot, ClaudeBot,
   PerplexityBot and Google-Extended. Blocking them is the default failure mode;
@@ -906,6 +906,61 @@ Two traps worth remembering, both hit during this change:
   near-opaque fill. A bare `.nav-mobile` override loses to the `(0,2,0)` theme
   rules that set `--nav-tint`, so both `.nav-mobile.nav-theme-*` are named
   explicitly.
+
+## The glass engine — one material, three thicknesses
+
+Every surface on this site carried `.glass`, which meant a 90px trust chip and
+a 700px FAQ panel rendered from **identical material**. That is the one thing a
+glass system must not do: material weight is how a layered interface
+communicates hierarchy. A big pane is thick glass — heavier frost, deeper
+shadow, less transparent. A small control is a thin sliver.
+
+The material is now a set of tokens with three tiers, and a surface **opts into
+a tier** rather than redeclaring a filter. Adding a component means picking a
+tier, not inventing numbers.
+
+| tier | frost | saturate | rim | used by |
+|---|---|---|---|---|
+| **1 thin** | `10px` | `145%` | `.34` | tabs, trust chips, gold buttons, `.page-back`, social chips, allergen tags |
+| **2 medium** | `20px` | `165%` | `.52` | cards, thali panels, reviews, FAQ, notes |
+| **3 thick** | `30px` | `190%` | `.74` | hero pane, footer panel, a11y panel, mobile bar, nav sheet |
+
+Verified in the browser: chips `10px` → cards `20px` → panes `30px`, every
+surface inside a tier identical, and the hierarchy strictly increasing.
+
+Frost, saturation, fill, rim brightness and shadow depth all scale **together**
+across the tiers, because they are facets of one physical property — thickness
+— not independent knobs.
+
+**Colour is not set by the engine.** Each tier resolves against the `--s-*`
+surface tokens that `.section--dark` / `.section--light` already re-point, so
+one tier reads correctly over the black hero *and* the cream sections with no
+per-section overrides.
+
+**The lit edge is graded, not even.** Same reasoning as the nav and the
+selection drop: an even ring of brightness reads as a *border*; light landing
+top-left, skipping the sides and returning weaker underneath reads as a lit
+*edge*. Drawn on `::before`, masked to the padding ring so only the stroke
+shows, with `.glass--norim` for surfaces that already draw their own.
+
+**`#nav` is a deliberate exception** at `14px`, below tier 2. It is the only
+surface carrying the SVG refraction, and a bent backdrop already reads as
+glass — heavy frost would throw the bend away.
+
+### On the Next.js / React / Three.js brief
+
+Not adopted, deliberately. This site is static HTML/CSS/JS with **no build step
+and zero dependencies** — that is why it loads instantly, drops onto any host,
+and works offline from the service worker. Rebuilding five pages as a React app
+to add Framer Motion and Three.js would ship ~150KB of JavaScript before a
+hungry person on a phone sees the menu, and would mean re-porting the SEO
+JSON-LD, the PWA, and the accessibility panel.
+
+Every capability in that brief is implemented here without it: the glass engine
+above, a real spring system (interruptible, velocity-carrying — see the drop),
+SVG-shader refraction with chromatic dispersion, adaptive material driven by a
+ground sampler, and the accessibility guarantees. Current cost: **113KB CSS,
+66KB JS, no framework.**
 
 ### The drop does NOT get its own SVG lens — and why
 
@@ -1148,6 +1203,128 @@ nothing. The shipped curve references 900px/s with a 1.25 exponent:
 its own duration and smear the effect. Reduced motion and the panel's "Pause
 animations" pin `--lg-speed` to 0, so the drop stays perfectly round.
 
+### One glass per item, not two
+
+Hovering a nav link painted **two** stacked translucent shapes: the drop springs
+to whatever link the pointer enters, and `.nav-link:hover` was also filling that
+same link with `--nav-hover-bg`. Two glass surfaces on one item is wrong
+physically and muddier than either alone.
+
+The hover fill is gone. **The drop is the hover indicator**; the link only
+changes ink. `.nav-mobile-link` keeps its fill — that sheet has no drop.
+
+### Labels under a clear lens
+
+With no frost flattening the backdrop, the labels carry themselves. Weight went
+`650 → 700` (weight adds presence without taking more space) and the shadow is
+now **two layers**: a tight one for edge definition against whatever the lens is
+bending underneath, and a wider soft one for separation.
+
+### Final lens calibration
+
+| | value |
+|---|---|
+| Nav scale | **110** (was 140) |
+| Bottom bar scale | **74** |
+| Falloff exponent | **2.4** |
+| Dispersion | **±9%** |
+| Strength | 250 |
+| Centre frost | none |
+
+The exponent is the stretch control. `3` snapped too tightly to the rim and
+`2` smeared the whole surface; `2.4` draws content into a long pull at the
+edge — the stretch the reference shows on app icons crossing the panel — while
+leaving the centre honest.
+
+### The filter region must be bigger than the element
+
+A blue-fringed rectangle appeared just inside the bar, and the bend only
+reached the middle. Both were one cause: the filter region was set to exactly
+the element box, so a displacement of up to `scale/2` (~81px) sampled outside
+it, found nothing, and the three colour channels landed on different empty
+pixels.
+
+The maps are now built with a **neutral border** and the region grown to match:
+
+```
+pad    = ceil(scale * 1.15 / 2) + 6
+region = (-pad, -pad, w + 2·pad, h + 2·pad)
+```
+
+The padding has to be **128 (neutral)**, not transparent — where the map has no
+alpha, R and G read 0 and the displacement becomes a full `-scale/2` push
+rather than none, which is worse than the original bug. The result is still
+clipped to the border box by `backdrop-filter`, so the larger region costs
+nothing visually; it only gives the bend real backdrop to reach for.
+
+Verified: nav region `877x256 at -87,-87` for a `703x82` bar, bottom bar
+`856x184 at -58,-58` for `740x68` — each pad clears its own max displacement.
+
+### Dispersion: ±9%, not ±15%
+
+The reference fringes on **features** crossing the rim — letterforms, edges of
+objects — but does not paint a spectrum along the whole edge. At ±15% any hard
+horizontal boundary in the backdrop (the top of a hero photograph) separated
+into a continuous rainbow band, which reads as a rendering fault rather than as
+glass. ±9% keeps dispersion on detail and loses the band.
+
+### The bottom bar is lensed too
+
+`.mobile-cta` carries the same material with gentler numbers — `scale 90`
+against the nav's `140`. It is a squared-off full-width strip rather than a
+pill, so only its top edge is ever crossed, and a 140 bend there smears the
+whole strip instead of reading as an edge.
+
+> Both bars share one `Glass` class and one `syncLensClasses()`, so the
+> accessibility switches drop and restore them together.
+
+### Clear glass, not frosted
+
+The reference material's **centre is fully clear** — text behind it is crisp and
+merely tinted — and every optical effect lives in the edge band. So the lensed
+bar carries **no blur term at all**:
+
+```css
+backdrop-filter: url(#lgNavLens) saturate(var(--nav-sat));
+```
+
+Frost and refraction are alternative ways of saying "glass", and mixing them
+wastes both: blur softens away the very bend that reads as an edge, and it
+hides the content that makes the bend visible in the first place. Legibility
+comes from `--nav-glass-bg` alone — the "minor dark tone" — plus the label
+text-shadow. Saturation stays, because a lens concentrates colour.
+
+The one remaining blur is a `0.7` **pre-blur inside the filter**, and it is not
+frost: with nothing downstream to hide it, the displacement map's 8-bit
+quantisation would otherwise band visibly through the bend.
+
+Verified at 1:1 over the hero photograph: individual dishes readable through
+the bar, labels crisp, lens band at the rim.
+
+### Tuned against reference photography
+
+Matched to two reference captures of the real material — a pill over skin, and
+a panel with news text scrolling beneath it. What those show, and what the
+first pass got wrong:
+
+| | reference | was | now |
+|---|---|---|---|
+| Centre | nearly clear — you read the text through it | `45%` of frost | **`18%`** |
+| Edge falloff | tight, hard band | `t²` (early, wide, weak) | **`t³`** |
+| Displacement | text stretches to several times its height | `78` | **`140`** |
+| Map strength | — | `205` | **`250`** (128 is neutral, 255 the max an 8-bit channel encodes) |
+| Dispersion | obvious red/blue split at the rim | `±8%` | **`±15%`** |
+| Rim width | thick lit edge | `3.5px` | **`5px`** |
+
+The falloff exponent is the one that matters most. A squared ramp starts too
+early and spreads a weak bend across the whole surface, which reads as a smear.
+Cubic keeps the centre honest — text behind the middle stays readable — and
+concentrates everything into a band at the rim, which is exactly what the
+reference does.
+
+Verified with large text passing under the bar at 1:1: crisp outside, visibly
+displaced with colour fringing inside, strongest where it crosses the edge.
+
 ### Why it reads as glass while the page moves
 
 The displacement band spans the **full half-height** of the bar, so the surface
@@ -1275,7 +1452,7 @@ Other editorial calls, all easy to change:
 |---|---|
 | Hero | `../hero-bg.webp` |
 | Executive Thali card | `../Rajwadi Executive Thali.jpg` |
-| Platinum Thali card | `../Rajwadi platinum-thali.jpg` |
+| Platinum Thali card | `platinum-thali.webp` (was `../Rajwadi platinum-thali.jpg`, a byte-identical duplicate, removed) |
 | Chole Bhature card / Combo | `../Gallary/w640/dish-12.webp` |
 | Mumbai Pav Bhaji | `dish-11.webp` |
 | Sarsoon Ka Saag | `sarson-ka-saag-makki-ki-roti.webp` |

@@ -9,9 +9,11 @@
 
    CACHING STRATEGY — deliberately conservative for a static site:
 
-     navigations   network first, cache second, offline page last. A menu or a
-                   price must never be served stale from a week-old cache just
-                   because the network was slow.
+     navigations   network first, then the SAME page from cache, then the
+                   offline page. A menu or a price must never be served stale
+                   from a week-old cache just because the network was slow --
+                   and the cached copy must be the same document, not merely
+                   one with a matching path (see the navigation handler).
      assets        cache first on an EXACT url match, network otherwise.
 
    The exactness matters. Every asset is linked with a content-hash query
@@ -29,7 +31,7 @@
    activate, so a bump is the clean way to evict everything at once.
    ========================================================================== */
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v12';
 const SHELL_CACHE = 'rajwadi-shell-' + CACHE_VERSION;
 const RUNTIME_CACHE = 'rajwadi-runtime-' + CACHE_VERSION;
 const OFFLINE_URL = 'offline.html';
@@ -46,6 +48,11 @@ const SHELL = [
   'assets/css/styles.css',
   'assets/js/main.js',
   'assets/img/logo.webp',
+  /* The menu page, plus the photos it shows. It references the site's images
+     by path rather than embedding them, so it stays small and shares the cache
+     with the rest of the site — but that means the pictures have to be in the
+     shell too, or the page comes up bare with no signal. */
+  'menu.html',
   'assets/img/icon-192.png',
   'assets/img/icon-512.png',
   'favicon.ico',
@@ -89,18 +96,39 @@ self.addEventListener('fetch', (event) => {
 
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
+      /* Cached under the PATH, never under the full URL. A page reached as
+         ?utm_source=..., ?fbclid=..., or any other tracking query is the same
+         document, and storing one entry per query turns the cache into a pile
+         of near-identical copies of the same page -- which is what made the
+         fallback below dangerous. */
+      const canonical = new Request(new URL(req.url).pathname, { credentials: 'same-origin' });
       try {
         const preload = await event.preloadResponse;
         if (preload) {
-          putSafe(RUNTIME_CACHE, req, preload.clone());
+          putSafe(RUNTIME_CACHE, canonical, preload.clone());
           return preload;
         }
         const fresh = await fetch(req);
-        putSafe(RUNTIME_CACHE, req, fresh.clone());
+        putSafe(RUNTIME_CACHE, canonical, fresh.clone());
         return fresh;
       } catch (e) {
-        const cached = await caches.match(req, { ignoreSearch: true });
-        return cached || await caches.match(OFFLINE_URL) || Response.error();
+        /* THE FALLBACK MUST BE THE SAME PAGE, NOT A SIMILAR ONE.
+
+           This matched with ignoreSearch, which does not mean "ignore the
+           cache-buster" -- it means any cached entry whose path matches will
+           do. One flaky request for /index.html?x=2 was answered with a copy
+           of /index.html?x=1 saved at some arbitrary earlier point, and since
+           that HTML names its stylesheet and script by content hash, and those
+           old hashed files were still sitting in the runtime cache, the whole
+           stale set got served together. The page came up looking fine and was
+           weeks out of date.
+
+           Exact path only, then the offline shell. A page that is honestly
+           offline is recoverable; a page silently running last month's code is
+           not. */
+        return (await caches.match(canonical))
+            || (await caches.match(OFFLINE_URL, { ignoreSearch: true }))
+            || Response.error();
       }
     })());
     return;
@@ -129,12 +157,38 @@ self.addEventListener('fetch', (event) => {
     try {
       const res = await fetch(req);
       putSafe(RUNTIME_CACHE, req, res.clone());
+      /* A new hash for a file supersedes every older hash of that same file.
+         Without this the runtime cache keeps one copy per version FOREVER --
+         it had eleven stylesheets and nine scripts in it during development --
+         and every one of them stays available for something to serve by
+         mistake. Evicting the moment a newer one lands means there is only
+         ever one answer to "what is main.js". */
+      evictOlder(RUNTIME_CACHE, req);
       return res;
     } catch (e) {
-      return await caches.match(req, { ignoreSearch: true }) || Response.error();
+      /* Deliberately NOT ignoreSearch: see the navigation handler. A hashed
+         asset that is missing has to fail rather than be answered with a
+         different version of itself. */
+      return Response.error();
     }
   })());
 });
+
+/* Drop other cached versions of the same path, keeping the one just stored. */
+async function evictOlder(cacheName, req) {
+  try {
+    const url = new URL(req.url);
+    if (!url.searchParams.has('v')) return;
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    await Promise.all(keys.map((k) => {
+      const ku = new URL(k.url);
+      if (ku.pathname !== url.pathname) return null;
+      if (ku.search === url.search) return null;
+      return cache.delete(k);
+    }));
+  } catch (e) { /* eviction is housekeeping; never let it break a response */ }
+}
 
 /* Opaque and error responses are not worth storing, and a failed put must
    never reject the response the page is waiting on. */

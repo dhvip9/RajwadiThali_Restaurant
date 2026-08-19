@@ -56,7 +56,11 @@ except ImportError:                                           # pragma: no cover
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE = os.path.join(HERE, "site")
 IMG = os.path.join(SITE, "assets", "img")
-SRC = os.path.join(IMG, "title logo.png")
+# The master lives OUTSIDE site/ on purpose. It is a build input, not a
+# runtime asset: no page ever fetches it, but sitting in site/assets/img/
+# it was deploying 1.85MB — 39% of the whole site payload — to every
+# visitor for nothing. Kept at the repo root next to the other sources.
+SRC = os.path.join(HERE, "title logo.png")
 
 # brightness window over which the black corner ground fades into the artwork
 CUT_LO, CUT_HI = 8, 40

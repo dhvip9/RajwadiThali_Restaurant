@@ -10,32 +10,55 @@
 <link rel="icon" type="image/png" sizes="192x192" href="assets/img/icon-192.png">
 <!-- Deliberately self-contained: this page is the fallback for having no
      network, so it cannot depend on the stylesheet or the webfonts loading.
-     The palette is the site's, hardcoded. -->
+     The palette is the site's, hardcoded. The game below is drawn entirely
+     with canvas paths for the same reason — a sprite sheet is one more file
+     that would not be there at the moment it is needed. -->
 <style>
   :root {
     --gold: #d49b3a; --gold-light: #e8be72; --gold-ink: #8a5a0f;
     --bg: #f5f0e7; --ink: #1a1a1c; --gray: #616161;
   }
   * { box-sizing: border-box; }
+
+  /* ONE SCREEN, NO SCROLLING.
+     The whole point of this page is that it is the first thing you see when
+     something has gone wrong, so it should be readable at a glance rather than
+     explored. Everything above the game is sized in vh as well as rem, so on a
+     short window the type and the spacing give way together instead of the
+     last item falling off the bottom; the game is the flex item that takes
+     whatever is left over, so it shrinks to fit rather than pushing.
+
+     dvh, not vh: on a phone, vh is the viewport with the browser's toolbars
+     hidden, which is a height the page does not actually have until you
+     scroll — using it here would guarantee the scrollbar this rule exists to
+     remove. */
+  html { height: 100%; }
   body {
-    margin: 0; min-height: 100vh; padding: 32px 24px;
+    margin: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    padding: clamp(10px, 2.2vh, 30px) 20px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: clamp(5px, 1.3vh, 13px);
     text-align: center; background: var(--bg); color: var(--ink);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    line-height: 1.65;
+    line-height: 1.5;
   }
-  img { width: 96px; height: 96px; display: block; margin: 0 0 26px; }
+  .logo { width: clamp(40px, 8vh, 88px); height: auto; display: block; margin: 0; flex: 0 0 auto; }
   h1 {
-    margin: 0 0 12px; font-family: 'Cormorant Garamond', Georgia, serif;
-    font-weight: 700; letter-spacing: .01em; font-size: clamp(1.75rem, 6vw, 2.5rem);
-    line-height: 1.14; color: var(--gold-ink);
+    margin: 0; font-family: 'Cormorant Garamond', Georgia, serif;
+    font-weight: 700; letter-spacing: .01em;
+    font-size: clamp(1.25rem, 4.4vh, 2.4rem);
+    line-height: 1.12; color: var(--gold-ink); flex: 0 0 auto;
   }
-  p { margin: 0 0 26px; max-width: 46ch; color: #333; }
-  .row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  p { margin: 0; max-width: 46ch; color: #333; font-size: clamp(.8rem, 1.95vh, .98rem); flex: 0 0 auto; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; flex: 0 0 auto; }
   a, button {
-    font: inherit; font-weight: 600; font-size: .9rem; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: clamp(.8rem, 1.8vh, .9rem); cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
-    min-height: 48px; padding: 12px 26px; border-radius: 100px; text-decoration: none;
+    min-height: clamp(38px, 6vh, 48px); padding: 10px clamp(16px, 3vw, 26px);
+    border-radius: 100px; text-decoration: none;
   }
   .primary {
     color: #17120a; border: 1px solid rgba(255, 235, 190, .55);
@@ -43,13 +66,105 @@
     box-shadow: 0 8px 28px rgba(184, 122, 37, .35);
   }
   .secondary { color: var(--gold-ink); background: rgba(212, 155, 58, .1); border: 1px solid rgba(212, 155, 58, .55); }
-  .tel { margin-top: 26px; font-size: .92rem; color: var(--gray); }
+  .tel { font-size: clamp(.74rem, 1.7vh, .92rem); color: var(--gray); }
   .tel a { display: inline; min-height: 0; padding: 0; color: var(--gold-ink); text-decoration: underline; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+
+  /* ---- the game ----------------------------------------------------------
+     Sits below everything the page is actually for. Someone who opened this
+     because they wanted the menu should reach "Try again", "Go to home" and
+     the phone number before they reach a toy.
+
+     It is also the only item allowed to grow and shrink, which is what keeps
+     the page on one screen: whatever height the message above does not use,
+     the stage takes, and when there is very little left the stage gives it
+     back rather than forcing a scrollbar. */
+  .game {
+    /* --stage-h is the tallest the playfield is allowed to be; the width below
+       is derived from it, so the frame is bounded by BOTH the column width and
+       the viewport height without ever leaving the 600:170 shape. */
+    --stage-h: 27vh;
+    width: 100%; max-width: 620px; margin: 0;
+    border-top: 1px solid rgba(212, 155, 58, .3);
+    padding-top: clamp(8px, 1.6vh, 20px);
+    /* Sized to its content, not stretched. Letting it grow put every spare
+       pixel INSIDE the section — which is what opened that hole between the
+       divider and "While you wait". The spare space belongs to the page, where
+       body's centring splits it evenly above and below everything. */
+    flex: 0 0 auto;
+    display: flex; flex-direction: column;
+  }
+  .game h2 {
+    margin: 0 0 2px; font-size: clamp(.66rem, 1.5vh, .78rem); font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--gold-ink); flex: 0 0 auto;
+  }
+  .game-hint {
+    margin: 0 auto clamp(5px, 1.1vh, 12px); max-width: 42ch;
+    font-size: clamp(.68rem, 1.55vh, .82rem);
+    color: var(--gray); flex: 0 0 auto;
+  }
+  /* min-height:0 is what actually lets this shrink — without it a flex item
+     refuses to go below the size of its content, and the canvas inside would
+     hold the whole page open. */
+  /* The STAGE carries the aspect ratio, not the canvas. Sizing the canvas to
+     "contain" inside a full-width stage kept the picture the right shape but
+     left the box padded out with dead space either side of it whenever the
+     height ran out first. Giving the frame itself the ratio means the frame is
+     the thing that shrinks, and the canvas simply fills it. */
+  .stage {
+    position: relative; border-radius: 16px; overflow: hidden;
+    /* The frame is an inset shadow rather than a border on purpose. With
+       box-sizing:border-box the aspect ratio applies to the BORDER box, so a
+       1px border leaves the content box at 598:168 — the canvas fills that and
+       comes out stretched by a couple of percent against its own 600:170
+       bitmap. A shadow paints in the same place and takes no layout, so the
+       content box keeps the ratio exactly. */
+    box-shadow: inset 0 0 0 1px rgba(212, 155, 58, .34);
+    background: #fbf7f0;
+    transition: background-color .5s ease, box-shadow .5s ease;
+    aspect-ratio: 600 / 170;
+    width: min(100%, calc(var(--stage-h) * 600 / 170));
+    height: auto;
+    align-self: center;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stage.night { background: #14141a; box-shadow: inset 0 0 0 1px rgba(232, 190, 114, .3); }
+  /* auto/auto with both maxes is the contain fit: the canvas keeps the aspect
+     of its own backing store and scales down to whichever side runs out
+     first, so a short window narrows the picture instead of squashing it. */
+  .stage canvas {
+    display: block; width: 100%; height: 100%; touch-action: manipulation;
+  }
+  .stage:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+  .scores {
+    /* max-width:none because this is a <p>, and the base paragraph rule caps
+       every p at 46ch for readability. That cap is right for prose and wrong
+       for a two-item row: it held the row to ~348px inside a 620px section, so
+       "centred" content was centred inside a box pinned to the left edge. */
+    max-width: none;
+    display: flex; justify-content: center; gap: clamp(22px, 9vw, 60px);
+    align-items: baseline;
+    margin: clamp(4px, .9vh, 10px) 0 0; font-size: clamp(.68rem, 1.5vh, .78rem);
+    letter-spacing: .1em; font-variant-numeric: tabular-nums; color: var(--gray);
+    flex: 0 0 auto;
+  }
+  .scores b { color: var(--gold-ink); font-weight: 700; }
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  /* Back online while someone is mid-run: say so, but let them finish. */
+  .back-online {
+    display: none; margin: 0; padding: 10px 16px; border-radius: 14px; flex: 0 0 auto;
+    background: rgba(212, 155, 58, .14); border: 1px solid rgba(212, 155, 58, .5);
+    font-size: .88rem; color: var(--gold-ink);
+  }
+  .back-online.show { display: block; }
+  .back-online button { min-height: 40px; padding: 8px 18px; margin-left: 10px; font-size: .84rem; }
 </style>
 </head>
 <body>
-  <img src="assets/img/icon-192.png" alt="Rajwadi Thali">
+  <img class="logo" src="assets/img/icon-192.png" alt="Rajwadi Thali">
   <h1>You're offline</h1>
   <p>
     We can't reach the kitchen right now. Any page you've already visited will
@@ -62,9 +177,413 @@
   <p class="tel">
     Need us now? Call <a href="tel:+15108968976">(510) 896-8976</a>
   </p>
+
+  <div class="back-online" id="backOnline" role="status">
+    You're back online.
+    <button class="secondary" onclick="location.reload()">Reload the site</button>
+  </div>
+
+  <section class="game" aria-labelledby="gameTitle">
+    <h2 id="gameTitle">While you wait</h2>
+    <p class="game-hint">
+      Samosa Run &nbsp;·&nbsp; <b>Space</b> start &nbsp;·&nbsp; <b>&uarr;</b> hop the chai
+      &nbsp;·&nbsp; <b>&darr;</b> duck the toran &nbsp;·&nbsp; or tap to hop, hold to duck
+    </p>
+    <div class="stage" id="stage" tabindex="0" role="application"
+         aria-label="Samosa Run, a small jumping game. Press Space to start and to jump, Down arrow to duck.">
+      <canvas id="game" width="600" height="170"></canvas>
+    </div>
+    <p class="scores">
+      <span>SCORE <b id="score">0</b></span>
+      <span>BEST <b id="best">0</b></span>
+    </p>
+    <p class="sr" role="status" aria-live="polite" id="gameLive"></p>
+  </section>
+
   <script>
-    // come back on its own the moment the connection returns
-    addEventListener('online', () => location.reload());
+  (function () {
+    'use strict';
+
+    /* ------------------------------------------------------------------ *
+     * SAMOSA RUN                                                         *
+     *                                                                    *
+     * Everything is drawn with paths. No sprite sheet, no audio file, no *
+     * webfont — this page exists precisely for the moment when fetching  *
+     * another file is the one thing that cannot happen, so the game has  *
+     * to be made of nothing but this script.                             *
+     * ------------------------------------------------------------------ */
+
+    var cv = document.getElementById('game');
+    if (!cv || !cv.getContext) return;            /* no canvas: the page still works */
+    var ctx = cv.getContext('2d');
+    var stage = document.getElementById('stage');
+    var scoreEl = document.getElementById('score');
+    var bestEl = document.getElementById('best');
+    var live = document.getElementById('gameLive');
+
+    var W = 600, H = 170, GROUND = 138;
+
+    /* Backing store at device resolution, CSS size left to the stylesheet, so
+       the ground line and the samosa's seam stay crisp on a phone. */
+    function resize() {
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = W * dpr; cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      /* Setting canvas.width WIPES the bitmap, and outside a run there is no
+         animation frame coming to put anything back — so a window resize left
+         an empty box on screen until you happened to press start. Repaint on
+         the way out.
+
+         Guarded on `obstacles`, not on `draw`. Both the function and the state
+         it reads are declared below this point: the function is hoisted and
+         the state is not, so testing for the function said yes while the state
+         was still undefined, and the first call threw and took the entire
+         script down with it. The precondition is the state. */
+      if (obstacles) draw();
+    }
+    addEventListener('resize', resize);
+
+    var HI_KEY = 'rt-offline-best';
+    var best = 0;
+    try { best = parseInt(localStorage.getItem(HI_KEY), 10) || 0; } catch (e) {}
+    bestEl.textContent = best;
+
+    /* ---- state ---- */
+    var IDLE = 0, RUN = 1, OVER = 2;
+    var mode = IDLE;
+    var player, obstacles, speed, dist, score, night, legT, leg, spawnIn, shake;
+    var raf = null, last = 0;
+
+    function reset() {
+      player = { y: 0, vy: 0, ducking: false, h: 30 };
+      obstacles = [];
+      speed = 300; dist = 0; score = 0; night = false;
+      legT = 0; leg = 0; spawnIn = 320; shake = 0;
+      stage.classList.remove('night');
+      scoreEl.textContent = '0';
+    }
+    reset();
+    resize();          /* now that there is something for it to repaint */
+
+    /* ---- obstacles ------------------------------------------------------
+       Two families, because one is a jump and the other is a duck, and a
+       runner with only one verb stops asking anything of you after a minute.
+         chai  a row of cutting-chai glasses on the ground — hop it
+         puri  a fried disc floating at head height — duck under it        */
+    function spawn() {
+      var r = Math.random();
+      /* the hanging one is held back until the jump has had time to be
+         learned, and stays the rarer of the two after that */
+      if (score > 180 && r < 0.28) {
+        /* HANGS from the top rather than floating.
+           The first version of this was a puri bobbing at head height, and
+           simulating the game caught the flaw: a player who only ever jumps
+           scored exactly the same as one who jumped AND ducked, because the
+           jump arc carried them clean over it. The duck was a verb the game
+           never asked for. Something suspended from the ceiling cannot be
+           jumped over at all — the only way past is under it — so the second
+           verb becomes the answer to a real question.
+           Bottom edge at 115: a standing samosa's head is at 108 and hits it,
+           a ducking one is at 121 and passes with six pixels to spare. */
+        obstacles.push({ type: 'toran', x: W + 20, w: 40, h: 115, y: 0, sway: Math.random() * 6.28 });
+      } else {
+        var n = 1 + (Math.random() * (score > 320 ? 3 : 2) | 0);
+        obstacles.push({ type: 'chai', x: W + 20, w: n * 15 + 5, h: 30 + (Math.random() * 6 | 0), n: n });
+      }
+    }
+
+    /* ---- drawing -------------------------------------------------------- */
+    function ink() { return night ? '#f3ece0' : '#2a2118'; }
+    function gold() { return night ? '#e8be72' : '#c8901f'; }
+
+    function drawSamosa(x, y, h) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = gold();
+      ctx.strokeStyle = ink();
+      ctx.lineWidth = 2;
+      ctx.beginPath();                       /* the body: a fat triangle */
+      ctx.moveTo(16, -h);
+      ctx.lineTo(30, 0);
+      ctx.lineTo(2, 0);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();                       /* the seam */
+      ctx.moveTo(16, -h + 3);
+      ctx.lineTo(16, -3);
+      ctx.lineWidth = 1.4; ctx.globalAlpha = .55;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = ink();                 /* eye */
+      ctx.beginPath(); ctx.arc(21, -h * 0.52, 1.9, 0, 6.283); ctx.fill();
+      ctx.restore();
+    }
+
+    function drawLegs(x, y, ducking) {
+      ctx.strokeStyle = ink(); ctx.lineWidth = 2.4;
+      var a = ducking ? 0 : (leg ? 4 : -4);
+      var b = ducking ? 0 : (leg ? -4 : 4);
+      ctx.beginPath();
+      ctx.moveTo(x + 10, y); ctx.lineTo(x + 10 + a, y + 7);
+      ctx.moveTo(x + 22, y); ctx.lineTo(x + 22 + b, y + 7);
+      ctx.stroke();
+    }
+
+    function drawChai(o) {
+      for (var i = 0; i < o.n; i++) {
+        var gx = o.x + i * 15, gy = GROUND, gh = o.h - (i % 2 ? 4 : 0);
+        ctx.fillStyle = night ? '#20202a' : '#ffffff';
+        ctx.strokeStyle = ink(); ctx.lineWidth = 2;
+        ctx.beginPath();                     /* a tapered cutting-chai glass */
+        ctx.moveTo(gx + 2, gy - gh);
+        ctx.lineTo(gx + 11, gy - gh);
+        ctx.lineTo(gx + 9, gy);
+        ctx.lineTo(gx + 4, gy);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();                     /* the chai in it */
+        ctx.moveTo(gx + 3, gy - gh + 5);
+        ctx.lineTo(gx + 10, gy - gh + 5);
+        ctx.strokeStyle = gold(); ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+
+    /* A toran — the marigold-and-leaf string hung across a doorway. It reads
+       instantly as something you go UNDER, which is the whole point: the shape
+       has to teach the verb before the player has lost a run to it. */
+    function drawToran(o) {
+      var sw = Math.sin(o.sway) * 2;         /* a little sway, horizontal only,
+                                                so it never changes the hitbox */
+      ctx.strokeStyle = ink(); ctx.lineWidth = 2;
+      ctx.beginPath();                       /* the string, slack in the middle */
+      ctx.moveTo(o.x, 0);
+      ctx.quadraticCurveTo(o.x + o.w / 2 + sw, 26, o.x + o.w, 0);
+      ctx.stroke();
+      /* three strands, the middle one hanging to the full depth */
+      for (var i = 0; i < 3; i++) {
+        var hx = o.x + 6 + i * 14 + sw * (i - 1) * 0.6;
+        var top = 16 + i * 3;
+        /* All three strands hang to nearly the same depth. The first version
+           had the outer two stopping 16px short, which drew a shape narrower
+           at the bottom than the box that actually kills you — the player is
+           entitled to believe the edges of a thing are where they look. */
+        var bottom = o.h - (i === 1 ? 0 : 4);
+        ctx.strokeStyle = ink(); ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(hx, top); ctx.lineTo(hx, bottom - 7); ctx.stroke();
+        /* leaves down the strand */
+        ctx.globalAlpha = .8;
+        for (var ly = top + 12; ly < bottom - 12; ly += 14) {
+          ctx.beginPath();
+          ctx.ellipse(hx - 4, ly, 4, 2.4, -0.5, 0, 6.283);
+          ctx.ellipse(hx + 4, ly + 6, 4, 2.4, 0.5, 0, 6.283);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        /* the marigold on the end */
+        ctx.fillStyle = gold();
+        ctx.beginPath(); ctx.arc(hx, bottom - 4, 4.6, 0, 6.283); ctx.fill(); ctx.stroke();
+      }
+    }
+
+    function drawGround() {
+      ctx.strokeStyle = ink(); ctx.lineWidth = 2; ctx.globalAlpha = .75;
+      ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+      /* speckle that scrolls, so speed stays legible with nothing on screen */
+      ctx.globalAlpha = .35;
+      var off = dist % 40;
+      for (var x = -off; x < W; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, GROUND + 5); ctx.lineTo(x + 9, GROUND + 5);
+        ctx.moveTo(x + 20, GROUND + 9); ctx.lineTo(x + 26, GROUND + 9);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function centred(text, y, size, alpha) {
+      ctx.fillStyle = ink(); ctx.globalAlpha = alpha == null ? 1 : alpha;
+      ctx.font = '600 ' + size + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, W / 2, y);
+      ctx.globalAlpha = 1;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+
+      drawGround();
+      for (var i = 0; i < obstacles.length; i++) {
+        var o = obstacles[i];
+        if (o.type === 'chai') drawChai(o); else drawToran(o);
+      }
+
+      var py = GROUND + player.y;
+      drawLegs(56, py, player.ducking);
+      drawSamosa(56, py, player.h);
+
+      if (mode === IDLE) centred('Press Space or tap to start', 44, 15, .85);
+      if (mode === OVER) {
+        centred('G A M E   O V E R', 40, 17);
+        centred('Space or tap to run again', 60, 13, .7);
+      }
+      ctx.restore();
+    }
+
+    /* ---- loop ----------------------------------------------------------- */
+    function step(dt) {
+      if (mode !== RUN) return;
+
+      speed = Math.min(900, speed + dt * 9);
+      dist += speed * dt;
+      score = Math.floor(dist / 12);
+      scoreEl.textContent = score;
+
+      /* the day/night flip, borrowed shamelessly — it is what makes a run
+         feel like it is going somewhere rather than repeating */
+      var wantNight = Math.floor(score / 700) % 2 === 1;
+      if (wantNight !== night) { night = wantNight; stage.classList.toggle('night', night); }
+
+      player.vy += 2500 * dt;                     /* gravity */
+      player.y += player.vy * dt;
+      if (player.y > 0) { player.y = 0; player.vy = 0; }
+      player.h = (player.ducking && player.y === 0) ? 17 : 30;
+
+      legT += dt;                                 /* run cycle */
+      if (legT > 0.11) { legT = 0; leg ^= 1; }
+
+      /* spawning measured in DISTANCE, not time, so the gaps stay jumpable as
+         the speed climbs rather than closing up into an impossible wall */
+      spawnIn -= speed * dt;
+      if (spawnIn <= 0) {
+        spawn();
+        spawnIn = 250 + Math.random() * 210 + speed * 0.28;
+      }
+
+      var px = 58, pw = 26, ph = player.h;
+      var ptop = GROUND + player.y - ph;
+      for (var i = obstacles.length - 1; i >= 0; i--) {
+        var o = obstacles[i];
+        o.x -= speed * dt;
+        if (o.type === 'toran') o.sway += dt * 2.2;
+        if (o.x + o.w < -10) { obstacles.splice(i, 1); continue; }
+
+        var oy = o.type === 'toran' ? o.y : GROUND - o.h;
+        /* a few pixels of mercy on every edge: pixel-exact collision against a
+           shape with a pointed top reads as unfair every single time */
+        if (px + pw - 3 > o.x + 3 && px + 3 < o.x + o.w - 3 &&
+            ptop + 3 < oy + o.h - 2 && ptop + ph - 2 > oy + 2) {
+          gameOver();
+          return;
+        }
+      }
+      if (shake > 0) shake = Math.max(0, shake - dt * 30);
+    }
+
+    function frame(t) {
+      raf = requestAnimationFrame(frame);
+      if (!last) last = t;
+      /* clamped: a tab that comes back from the background hands you a huge
+         delta, and an unclamped one teleports the player through whatever is
+         on screen */
+      var dt = Math.min((t - last) / 1000, 0.05);
+      last = t;
+      step(dt);
+      draw();
+    }
+
+    function start() {
+      if (mode === RUN) return;
+      reset();
+      mode = RUN;
+      last = 0;
+      if (live) live.textContent = 'Game started.';
+      if (raf === null) raf = requestAnimationFrame(frame);
+    }
+
+    function gameOver() {
+      if (mode !== RUN) return;
+      mode = OVER;
+      shake = 8;
+      if (score > best) {
+        best = score;
+        bestEl.textContent = best;
+        try { localStorage.setItem(HI_KEY, String(best)); } catch (e) {}
+      }
+      if (live) live.textContent = 'Game over. Score ' + score + '. Best ' + best + '.';
+      draw();
+    }
+
+    /* ---- input ----------------------------------------------------------
+       The page's own controls come first. Space is only swallowed once the
+       game has been deliberately entered — otherwise pressing Space to
+       activate "Try again" would quietly start a game instead of reloading. */
+    function wantsKeys() {
+      return stage.contains(document.activeElement) || mode === RUN;
+    }
+
+    function jump() {
+      if (mode !== RUN) { start(); return; }
+      if (player.y === 0) { player.vy = -740; player.ducking = false; }
+    }
+
+    addEventListener('keydown', function (e) {
+      var k = e.key;
+      var up = k === ' ' || k === 'Spacebar' || k === 'ArrowUp' || k === 'w' || k === 'W';
+      var down = k === 'ArrowDown' || k === 's' || k === 'S';
+      if ((!up && !down) || !wantsKeys()) return;
+      e.preventDefault();
+      if (up) { jump(); return; }
+      if (mode === RUN) {
+        player.ducking = true;
+        if (player.y < 0) player.vy += 1400;      /* snap down out of a jump */
+      }
+    });
+
+    addEventListener('keyup', function (e) {
+      var k = e.key;
+      if (k === 'ArrowDown' || k === 's' || k === 'S') player.ducking = false;
+    });
+
+    /* touch: a tap hops, press-and-hold ducks */
+    var holdTimer = null;
+    stage.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      stage.focus();
+      if (mode !== RUN) { start(); return; }
+      jump();
+      holdTimer = setTimeout(function () { player.ducking = true; }, 180);
+    });
+    function release() { clearTimeout(holdTimer); player.ducking = false; }
+    stage.addEventListener('pointerup', release);
+    stage.addEventListener('pointercancel', release);
+    stage.addEventListener('pointerleave', release);
+
+    /* Leaving the tab mid-run should not cost a life to frames that never
+       rendered, so the run is ended deliberately rather than resumed into a
+       screen full of obstacles. */
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) gameOver();
+    });
+
+    draw();
+
+    /* ---- coming back online --------------------------------------------
+       The page reloads itself the moment the network returns, which is right
+       when nobody is doing anything and wrong when somebody is mid-run. If a
+       game is going, offer the reload rather than performing it. */
+    addEventListener('online', function () {
+      if (mode === RUN) {
+        var b = document.getElementById('backOnline');
+        if (b) b.classList.add('show');
+      } else {
+        location.reload();
+      }
+    });
+  })();
   </script>
 </body>
 </html>

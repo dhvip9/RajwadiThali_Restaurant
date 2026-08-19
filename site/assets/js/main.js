@@ -128,11 +128,22 @@
        accessibility relayout — is unchanged. The tab pill keeps the CSS
        transition: nothing can grab it mid-motion, so it gains nothing. */
     if (pill === navPill && window.__lgSpringTo) { window.__lgSpringTo(target, false, fast); return; }
-    var p = pill.parentElement.getBoundingClientRect();
+    var box = pill.parentElement;
+    var p = box.getBoundingClientRect();
     var t = target.getBoundingClientRect();
     pill.style.width = t.width + 'px';
     pill.style.height = t.height + 'px';
-    pill.style.transform = 'translate(' + (t.left - p.left) + 'px,' + (t.top - p.top) + 'px)';
+    /* Scroll offsets matter now that the tab strip is a scroller. An absolutely
+       positioned child of a scroll container is placed against the padding box
+       and therefore travels WITH the content, while getBoundingClientRect
+       reports where things currently are on screen. Differencing the two rects
+       alone gives a position relative to the visible left edge, so the pill
+       would sit correctly only at scrollLeft 0 and drift by exactly the scroll
+       distance everywhere else. Adding the scroll offset converts back into the
+       content coordinates the pill is actually positioned in. */
+    pill.style.transform = 'translate(' +
+      (t.left - p.left + box.scrollLeft) + 'px,' +
+      (t.top - p.top + box.scrollTop) + 'px)';
     pill.classList.add('ready');
   }
 
@@ -275,6 +286,34 @@
     underTimer = setTimeout(function () { tab.classList.add('pill-under'); }, 300);
   }
 
+  /* A strip only behaves like a scroller when it has something to scroll: the
+     end fades and the snap points are switched on by this class rather than
+     assumed, so a strip that fits is left completely alone. */
+  function syncScrollable() {
+    var box = tabPill && tabPill.parentElement;
+    if (!box) return;
+    box.classList.toggle('is-scrollable', box.scrollWidth - box.clientWidth > 1);
+  }
+
+  /* Bring a tab fully into view when it is chosen — by keyboard especially,
+     where the arrow keys can walk onto an item that is entirely off screen. */
+  function revealTab(tab) {
+    var box = tab.parentElement;
+    if (!box || box.scrollWidth <= box.clientWidth) return;
+    var want = tab.offsetLeft - (box.clientWidth - tab.offsetWidth) / 2;
+    var max = box.scrollWidth - box.clientWidth;
+    if (want < 0) want = 0; else if (want > max) want = max;
+    if (Math.abs(want - box.scrollLeft) < 2) return;
+    /* Assigned, not animated from here. scrollTo({behavior:'smooth'}) hands the
+       scroll to an animation, and an animation that cannot run -- a background
+       tab, a browser that ignores the option -- leaves the scroller exactly
+       where it was, so the chosen tab silently stays off screen. Setting the
+       value commits it every time; `scroll-behavior` on the element makes it
+       smooth where smoothness is possible, and drops to an instant jump where
+       it is not. The reduced-motion case is handled in the stylesheet with it. */
+    box.scrollLeft = want;
+  }
+
   function selectTab(tab, instant) {
     var already = tab.classList.contains('is-active');
     tabs.forEach(function (t) {
@@ -288,6 +327,7 @@
       }
     });
     movePill(tabPill, tab);
+    revealTab(tab);
     markPillUnder(tab, instant || already);
   }
 
@@ -322,7 +362,8 @@
     applyNavTheme();
     applyHashTab();
     var active = tabs.filter(function (t) { return t.classList.contains('is-active'); })[0] || tabs[0];
-    if (active) { movePill(tabPill, active); markPillUnder(active, true); }
+    syncScrollable();
+    if (active) { movePill(tabPill, active); markPillUnder(active, true); revealTab(active); }
     syncNavPill();
   }
 
@@ -345,13 +386,21 @@
     measureBottomBar();
     applyNavTheme();
     var active = tabs.filter(function (t) { return t.classList.contains('is-active'); })[0];
+    syncScrollable();
     if (active) movePill(tabPill, active);
     syncNavPill();
   }
 
   if (window.ResizeObserver) {
-    var ro = new ResizeObserver(function () { requestAnimationFrame(relayout); });
-    [navLinksWrap, nav, mobileBar].forEach(function (el) { if (el) ro.observe(el); });
+    var ro = new ResizeObserver(function () {
+      /* the scroller flag is a read and a class toggle, so it is done straight
+         away rather than deferred: relayout waits on a frame, and a frame is
+         exactly what a backgrounded tab does not give you */
+      syncScrollable();
+      requestAnimationFrame(relayout);
+    });
+    [navLinksWrap, nav, mobileBar, tabPill && tabPill.parentElement]
+      .forEach(function (el) { if (el) ro.observe(el); });
   }
 
   /* ...and the settings that change layout without changing any watched box —
@@ -413,7 +462,7 @@
   if (!btn || !panel) return;
 
   var KEY = 'rt-a11y';
-  var STEPS = ['text', 'line', 'align', 'contrast'];
+  var STEPS = ['text', 'line', 'align', 'contrast', 'opacity'];
   var FLAGS = ['font', 'gray', 'noimg', 'motion', 'links'];
   var root = document.documentElement;
   var state = {};
@@ -777,6 +826,11 @@
   var nav = document.getElementById('nav');
   var row = document.getElementById('navLinks');
   var pill = document.getElementById('navActivePill');
+  /* Queried here, not borrowed: the nav/menu bundle above has its own
+     `mobileBar` in ITS closure, and referencing that name from this IIFE
+     throws at module top level — which takes the entire glass module down
+     with it, lens and all. */
+  var mobileBar = document.querySelector('.mobile-cta');
   if (!nav) return;
 
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -855,93 +909,207 @@
    *                 one reads as a lit edge.                         *
    *                                                                  *
    * Pipeline, after the reference implementations:                   *
-   *   blur(1) -> displace x3 (chromatic) -> saturate -> mask by rim  *
-   *   -> screen back over the refraction.                            *
+   *   blur(1) -> displace (one pass, all channels) -> lift -> mask   *
+   *   by rim -> screen back over the refraction.                     *
    * ---------------------------------------------------------------- */
 
-  /* Signed distance to a rounded rectangle, negative inside. The maps need to
-     know how far each pixel is from the rim and which way the rim faces, and
-     an SDF gives both (the direction is its gradient). */
-  function sdRoundRect(px, py, hw, hh, r) {
-    var qx = Math.abs(px) - hw + r;
-    var qy = Math.abs(py) - hh + r;
-    var ax = qx > 0 ? qx : 0;
-    var ay = qy > 0 ? qy : 0;
-    return Math.sqrt(ax * ax + ay * ay) + Math.min(Math.max(qx, qy), 0) - r;
+  /* The signed distance to a rounded rectangle, and its gradient, are both
+     inlined into buildMaps below -- they share the same (qx, qy) and this is
+     the innermost loop on the page. What they compute:
+
+       qx = |px| - hw + r,  qy = |py| - hh + r
+       dist = |max(q, 0)| + min(max(qx, qy), 0) - r      negative inside
+       normal = normalize(q) diagonally outside, an axis otherwise
+
+     Negative inside, so -dist/bezel is how deep into the bezel a pixel sits,
+     and the gradient is the direction the rim faces there. */
+
+  /* ---- THE SURFACE ------------------------------------------------------
+     One function describes this material, and both maps are read off it: the
+     HEIGHT of the glass across its bezel. `x` runs 0 at the outer rim to 1
+     where the bezel meets the flat interior, and the result runs 0 to 1 in
+     units of the glass's own thickness.
+
+     This is the part the old map was guessing at. It had no surface -- it
+     took the distance from the rim, raised it to 2.4, and called the result a
+     displacement. That exponent was fitted by eye to a screenshot, which is
+     why every attempt to change one thing about the bend (make the edge
+     thicker, the bar taller) broke the rest of it: there was nothing
+     underneath the number to stay consistent. Give the glass a shape and the
+     bend, the highlight and the falloff all follow from it. */
+
+  /* The squircle, which is the profile Apple actually uses. Against a plain
+     circular dome its flat->curve join is far softer, and that matters more
+     here than anywhere: this bar is a ~1200x94 pill, about as stretched as a
+     rounded shape gets, and the circle leaves a visible seam running the
+     length of it where the bezel ends and the flat top begins. */
+  function pSquircle(x) { var u = 1 - x; return Math.pow(1 - u * u * u * u, 0.25); }
+  function pCircle(x)   { var u = 1 - x; return Math.sqrt(1 - u * u); }
+  function smootherstep(x) { return x * x * x * (x * (x * 6 - 15) + 10); }
+  /* a raised rim with a shallow dish behind it, for controls rather than bars */
+  function pLip(x) { var c = pSquircle(x), t = smootherstep(x); return c * (1 - t) + (1 - c) * t; }
+  var PROFILE = { squircle: pSquircle, circle: pCircle, lip: pLip };
+
+  /* dy/ds at x, in real pixels: height is scaled by `thick`, distance by
+     `bezel`, so the normalised derivative has to be rescaled by their ratio.
+     Central difference, clamped to the domain -- the slope runs away at x=0
+     (the rim of a dome is vertical) and sampling past it returns NaN. */
+  function surfaceSlope(f, x, bezel, thick) {
+    var d = 0.002;
+    var a = x - d < 0 ? 0 : x - d;
+    var b = x + d > 1 ? 1 : x + d;
+    return (f(b) - f(a)) / (b - a) * (thick / bezel);
   }
 
-  /* R encodes x offset, G encodes y offset, 128 being "no displacement". The
-     backdrop is sampled from further OUT the closer a pixel is to the rim,
-     which compresses it into the edge -- the squeeze you see through the thick
-     edge of real glass. `thickness` is how deep that bend reaches; at h/2 the
-     surface is a continuous lens rather than a bevelled frame, so content
-     moving through the middle still bends. */
-  function buildDisplacement(w, h, radius, thickness, strength) {
-    var c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    var ctx = c.getContext('2d');
-    var img = ctx.createImageData(w, h), d = img.data;
-    var hw = w / 2, hh = h / 2, e = 1;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        var px = x - hw + 0.5, py = y - hh + 0.5;
-        var dist = sdRoundRect(px, py, hw, hh, radius);
-        var i = (y * w + x) * 4;
-        var t = 1 + dist / thickness;
-        if (dist > 0 || t <= 0) {
-          d[i] = d[i + 1] = d[i + 2] = 128; d[i + 3] = 255; continue;
-        }
-        if (t > 1) t = 1;
-        t = t * t;
-        var nx = sdRoundRect(px + e, py, hw, hh, radius) - sdRoundRect(px - e, py, hw, hh, radius);
-        var ny = sdRoundRect(px, py + e, hw, hh, radius) - sdRoundRect(px, py - e, hw, hh, radius);
-        var len = Math.sqrt(nx * nx + ny * ny) || 1;
-        var amt = t * strength;
-        d[i]     = Math.max(0, Math.min(255, 128 + (nx / len) * amt));
-        d[i + 1] = Math.max(0, Math.min(255, 128 + (ny / len) * amt));
-        d[i + 2] = 128; d[i + 3] = 255;
-      }
+  /* ---- SNELL'S LAW ------------------------------------------------------
+       n1 sin(theta1) = n2 sin(theta2)
+
+     Working in the bezel's cross-section, where `s` runs inward from the rim
+     and `y` runs up. Air above (n1 = 1), glass below (n2, ~1.5). The eye is
+     straight overhead, so the incident ray is D = (0, -1) for every pixel and
+     the whole problem collapses to: tilt the surface, refract once, see where
+     the ray lands.
+
+     Two consequences worth knowing, because they are what make this look
+     right without any tuning:
+
+     The bend is SELF-LIMITING. However steep the bezel gets -- even vertical
+     at the very rim -- a ray entering glass can never travel more than the
+     critical angle asin(1/n) from vertical, 41.8 degrees at n=1.5. So the
+     displacement has a ceiling that comes out of the physics rather than out
+     of a clamp, and no amount of edge curvature can smear the bar.
+
+     The bend also goes to ZERO at the rim, because that is where the glass is
+     thinnest: the ray bends hardest there and then has almost no depth left
+     to fall through before it reaches the page. Peak displacement lands a
+     little way INSIDE the edge, and falls off both ways. That is the band you
+     see on the reference bar, and it is why the outermost hairline of it
+     stays crisp while the millimetre behind it is doing all the bending. */
+  function refractOffset(f, x, slope, thick, gap, eta) {
+    /* surface normal in (s, y). It tilts OUTWARD wherever the glass falls
+       away toward the rim, which is the whole bezel. */
+    var inv = 1 / Math.sqrt(1 + slope * slope);
+    var ns = -slope * inv, ny = inv;
+    var cosi = ny;                                   /* = -dot(N, D) */
+    var k = 1 - eta * eta * (1 - cosi * cosi);
+    if (k < 0) return 0;                             /* unreachable entering glass */
+    var g = eta * cosi - Math.sqrt(k);
+    var ts = g * ns;                                 /* inward component of T */
+    var ty = -eta + g * ny;                          /* downward component of T */
+    if (ty >= 0) return 0;
+    /* how far the ray still has to fall. `gap` is real: this bar floats above
+       the page -- it casts a shadow onto it -- and a floating pane keeps a
+       little deflection at the very rim where a pane laid flat on the page
+       would have none. */
+    return (gap + thick * f(x)) * (ts / -ty);        /* px, + = samples inward */
+  }
+
+  /* The offset depends only on how deep into the bezel a pixel sits, so the
+     simulation runs once along a single radius and is then reused the whole
+     way around the shape. 257 steps: the map that consumes this is 8-bit, so
+     past ~128 distinct values it is quantisation, not sampling, that limits
+     the result -- which is also the resolution the reference implementation
+     settles on for the same reason. */
+  function solveBezel(o) {
+    var f = PROFILE[o.profile] || pSquircle;
+    var eta = 1 / o.ior;
+    var n = 257;
+    var off = new Float64Array(n), slope = new Float64Array(n), max = 0;
+    for (var i = 0; i < n; i++) {
+      var x = i / (n - 1);
+      slope[i] = surfaceSlope(f, x, o.bezel, o.thickness);
+      off[i] = refractOffset(f, x, slope[i], o.thickness, o.gap, eta);
+      var a = off[i] < 0 ? -off[i] : off[i];
+      if (a > max) max = a;
     }
-    ctx.putImageData(img, 0, 0);
-    return c.toDataURL('image/png');
+    return { f: f, off: off, slope: slope, max: max, n: n };
   }
 
-  /* The specular rim: white where the edge faces the light, transparent where
-     it faces away. Light comes from the upper-left, and the OPPOSITE edge
-     catches a weaker bounce -- real glass is lit twice, once by the source and
-     once by what the source is bouncing off. Alpha is the mask; the filter
-     uses it to decide where the saturated layer shows through. */
-  function buildSpecular(w, h, radius, width) {
-    var c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    var ctx = c.getContext('2d');
-    var img = ctx.createImageData(w, h), d = img.data;
-    var hw = w / 2, hh = h / 2, e = 1;
-    /* unit vector toward the light, in screen space (y down) */
-    var lx = -0.62, ly = -0.78;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        var px = x - hw + 0.5, py = y - hh + 0.5;
-        var dist = sdRoundRect(px, py, hw, hh, radius);
-        var i = (y * w + x) * 4;
-        /* only a narrow band just inside the rim is the edge */
-        var band = 1 - Math.abs(dist + width / 2) / (width / 2);
-        if (dist > 0 || band <= 0) { d[i + 3] = 0; continue; }
-        var nx = sdRoundRect(px + e, py, hw, hh, radius) - sdRoundRect(px - e, py, hw, hh, radius);
-        var ny = sdRoundRect(px, py + e, hw, hh, radius) - sdRoundRect(px, py - e, hw, hh, radius);
-        var len = Math.sqrt(nx * nx + ny * ny) || 1;
-        nx /= len; ny /= len;
-        var facing = nx * lx + ny * ly;            /* 1 = straight at the light */
-        var lit = Math.max(0, facing);
-        var bounce = Math.max(0, -facing) * 0.42;  /* weaker rim from behind */
-        var a = band * (lit + bounce);
+  function clamp8(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+  /* BOTH MAPS, ONE PASS, ANALYTIC NORMALS.
+
+     This was two functions walking the same pixels, each calling the SDF five
+     times per pixel -- once for the distance and four more to difference a
+     gradient out of it. Ten evaluations per pixel, and on the hero panel that
+     came to a 199ms block on the main thread every time the window resized.
+
+     Two things were wasted. The gradient of a rounded rectangle does not need
+     differencing: the outward direction is the corner offset where the pixel
+     is diagonally outside the inner box, and an axis otherwise, which falls
+     straight out of the same (qx, qy) the distance already needs. And the
+     specular map wants exactly the geometry the displacement map has just
+     computed, so there is no reason to walk the pixels a second time.
+
+     One pass, one SDF term, one normal, both maps written together. */
+  function buildMaps(w, h, radius, o, sol, pad) {
+    pad = pad || 0;
+    var cw = w + pad * 2, ch = h + pad * 2;
+    var norm = sol.max > 0 ? 127 / sol.max : 0;
+    var hw = w / 2, hh = h / 2, r = radius;
+    var inv_bezel = 1 / o.bezel, last = sol.n - 1;
+    /* toward the light: upper left, and a little in front of the surface */
+    var lx = -0.56, ly = -0.71, lz = 0.43;
+    var spec = o.spec == null ? 2.2 : o.spec;
+
+    var dc = document.createElement('canvas'); dc.width = cw; dc.height = ch;
+    var sc = document.createElement('canvas'); sc.width = cw; sc.height = ch;
+    var dctx = dc.getContext('2d'), sctx = sc.getContext('2d');
+    var dimg = dctx.createImageData(cw, ch), simg = sctx.createImageData(cw, ch);
+    var dd = dimg.data, sd = simg.data;
+
+    for (var y = 0; y < ch; y++) {
+      var py = y - pad - hh + 0.5;
+      var ay = py < 0 ? -py : py, sy = py < 0 ? -1 : 1;
+      var qy = ay - hh + r;
+      for (var x = 0; x < cw; x++) {
+        var px = x - pad - hw + 0.5;
+        var ax = px < 0 ? -px : px, sx = px < 0 ? -1 : 1;
+        var qx = ax - hw + r;
+        var i = (y * cw + x) * 4;
+
+        var mx = qx > 0 ? qx : 0, my = qy > 0 ? qy : 0;
+        var outer = qx > qy ? qx : qy;
+        var dist = Math.sqrt(mx * mx + my * my) + (outer < 0 ? outer : 0) - r;
+
+        dd[i + 2] = 128; dd[i + 3] = 255;
+        var t = -dist * inv_bezel;
+        if (dist > 0 || t > 1) { dd[i] = dd[i + 1] = 128; sd[i + 3] = 0; continue; }
+
+        /* outward unit normal, exact */
+        var nx, ny;
+        if (qx > 0 && qy > 0) {
+          var l = Math.sqrt(qx * qx + qy * qy) || 1;
+          nx = sx * qx / l; ny = sy * qy / l;
+        } else if (qx > qy) { nx = sx; ny = 0; }
+        else { nx = 0; ny = sy; }
+
+        var k = (t * last + 0.5) | 0;
+
+        /* --- displacement: the gradient points OUT, the refracted ray goes in */
+        var amt = sol.off[k] * norm;
+        dd[i]     = clamp8(128 - nx * amt);
+        dd[i + 1] = clamp8(128 - ny * amt);
+
+        /* --- specular: the same normal, tilted by the bezel's own slope */
+        var slope = sol.slope[k];
+        var iv = 1 / Math.sqrt(1 + slope * slope);
+        var n3x = nx * slope * iv, n3y = ny * slope * iv, n3z = iv;
+        var facing = n3x * lx + n3y * ly + n3z * lz;
+        var lit = facing > 0 ? facing : 0;
+        /* real glass is lit twice, once by the source and once by whatever the
+           source is bouncing off, so the far edge keeps a weaker rim */
+        var bounce = (facing < 0 ? -facing : 0) * 0.42;
+        var a = (1 - n3z) * (lit + bounce) * spec;
+        if (a > 1) a = 1;
         a = a * a * (3 - 2 * a);                   /* smoothstep, softer falloff */
-        d[i] = d[i + 1] = d[i + 2] = 255;
-        d[i + 3] = Math.max(0, Math.min(255, a * 255));
+        sd[i] = sd[i + 1] = sd[i + 2] = 255;
+        sd[i + 3] = clamp8(a * 255);
       }
     }
-    ctx.putImageData(img, 0, 0);
-    return c.toDataURL('image/png');
+    dctx.putImageData(dimg, 0, 0);
+    sctx.putImageData(simg, 0, 0);
+    return { disp: dc.toDataURL('image/png'), spec: sc.toDataURL('image/png') };
   }
 
   /* backdrop-filter accepts url() per spec, but only Chromium actually renders
@@ -965,184 +1133,6 @@
     return defs;
   }
 
-  /* One piece of glass: owns its filter, its two maps, and the class it puts
-     on its element once there is something real to show. */
-  function Glass(el, id, opts) {
-    this.el = el; this.id = id;
-    this.o = opts || {};
-    this.w = 0; this.h = 0; this.pending = false;
-    this.built = false;
-  }
-
-  Glass.prototype._build = function () {
-    var NS = 'http://www.w3.org/2000/svg';
-    var f = document.createElementNS(NS, 'filter');
-    f.setAttribute('id', this.id);
-    f.setAttribute('color-interpolation-filters', 'sRGB');
-    /* An element whose size changes cannot use a fixed filter region -- it
-       would clip or leave a gap the moment the box no longer matches. In
-       objectBoundingBox units the region and the maps are always exactly the
-       element, whatever it currently measures, so the drop's own lensing
-       stretches along with it as it elongates. That stretching is not an
-       artefact here: a bead of liquid pulling out really does stretch the
-       image it is carrying. */
-    if (this.o.units === 'bbox') {
-      f.setAttribute('filterUnits', 'objectBoundingBox');
-      f.setAttribute('primitiveUnits', 'objectBoundingBox');
-      f.setAttribute('x', 0); f.setAttribute('y', 0);
-      f.setAttribute('width', 1); f.setAttribute('height', 1);
-    } else {
-      f.setAttribute('filterUnits', 'userSpaceOnUse');
-    }
-
-    var pre = document.createElementNS(NS, 'feGaussianBlur');
-    pre.setAttribute('in', 'SourceGraphic');
-    pre.setAttribute('stdDeviation', this.o.pre == null ? 1 : this.o.pre);
-    pre.setAttribute('result', 'pre');
-    f.appendChild(pre);
-
-    this.dmap = document.createElementNS(NS, 'feImage');
-    this.dmap.setAttribute('result', 'dmap');
-    this.dmap.setAttribute('preserveAspectRatio', 'none');
-    f.appendChild(this.dmap);
-
-    /* chromatic aberration: three passes at slightly different strengths, each
-       reduced to one channel and screened back. Real glass disperses, and the
-       fringing lands exactly where the bend is strongest -- the rim. */
-    var CH = [
-      { n: 'R', k: 1.08, m: '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0' },
-      { n: 'G', k: 1.00, m: '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0' },
-      { n: 'B', k: 0.92, m: '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0' }
-    ];
-    this.disp = [];
-    var self = this;
-    CH.forEach(function (c) {
-      var dm = document.createElementNS(NS, 'feDisplacementMap');
-      dm.setAttribute('in', 'pre'); dm.setAttribute('in2', 'dmap');
-      dm.setAttribute('xChannelSelector', 'R');
-      dm.setAttribute('yChannelSelector', 'G');
-      dm.setAttribute('result', 'd' + c.n);
-      dm._k = c.k;
-      f.appendChild(dm); self.disp.push(dm);
-      var cm = document.createElementNS(NS, 'feColorMatrix');
-      cm.setAttribute('in', 'd' + c.n); cm.setAttribute('type', 'matrix');
-      cm.setAttribute('values', c.m); cm.setAttribute('result', 'c' + c.n);
-      f.appendChild(cm);
-    });
-    var b1 = document.createElementNS(NS, 'feBlend');
-    b1.setAttribute('mode', 'screen'); b1.setAttribute('in', 'cR');
-    b1.setAttribute('in2', 'cG'); b1.setAttribute('result', 'rg');
-    f.appendChild(b1);
-    var b2 = document.createElementNS(NS, 'feBlend');
-    b2.setAttribute('mode', 'screen'); b2.setAttribute('in', 'rg');
-    b2.setAttribute('in2', 'cB'); b2.setAttribute('result', 'refr');
-    f.appendChild(b2);
-
-    /* the rim is lit by a SATURATED, brightened copy of the refraction, masked
-       to the specular band -- so the highlight carries the colour of whatever
-       is behind the glass instead of being a flat white stroke */
-    var sat = document.createElementNS(NS, 'feColorMatrix');
-    sat.setAttribute('in', 'refr'); sat.setAttribute('type', 'saturate');
-    sat.setAttribute('values', this.o.rimSat == null ? 2.6 : this.o.rimSat);
-    sat.setAttribute('result', 'sat');
-    f.appendChild(sat);
-
-    this.smap = document.createElementNS(NS, 'feImage');
-    this.smap.setAttribute('result', 'smapRaw');
-    this.smap.setAttribute('preserveAspectRatio', 'none');
-    f.appendChild(this.smap);
-    var sb = document.createElementNS(NS, 'feGaussianBlur');
-    sb.setAttribute('in', 'smapRaw'); sb.setAttribute('stdDeviation', 1);
-    sb.setAttribute('result', 'smap');
-    f.appendChild(sb);
-
-    var comp = document.createElementNS(NS, 'feComposite');
-    comp.setAttribute('in', 'sat'); comp.setAttribute('in2', 'smap');
-    comp.setAttribute('operator', 'in'); comp.setAttribute('result', 'rim');
-    f.appendChild(comp);
-
-    var out = document.createElementNS(NS, 'feBlend');
-    out.setAttribute('mode', 'screen');
-    out.setAttribute('in', 'refr'); out.setAttribute('in2', 'rim');
-    f.appendChild(out);
-
-    ensureDefs().appendChild(f);
-    this.filter = f;
-    this.built = true;
-  };
-
-  /* Re-measures inside the frame rather than capturing, and only claims a size
-     once the maps for it exist. Claiming first loses the race: boot fires
-     before layout settles, `load` fires again, the second call marks the real
-     geometry as done and bails on the pending flag, and the queued frame then
-     builds from the stale numbers its closure captured. */
-  /* `atW`/`atH` build the maps for a size the element is heading TO rather than
-     the one it currently measures. The drop is mid-flight most of the time it
-     is asked to rebuild, and measuring then would derive its corner radius and
-     rim width from a half-morphed box -- a 45x21 sliver instead of the 160x56
-     bead it is becoming. */
-  Glass.prototype.refresh = function (force, atW, atH) {
-    if (!canLens || !stillLens()) return;
-    /* Record what is WANTED and let the queued frame read it when it runs.
-       Capturing the size at schedule time and returning early on `pending`
-       loses every request that arrives before that frame fires — and since the
-       drop changes size on each hover, it would settle on whichever width
-       happened to be queued first and never correct itself. The pending frame
-       supersedes rather than blocks. */
-    this._wantW = atW || 0;
-    this._wantH = atH || 0;
-    this._force = force || this._force;
-    if (this.pending) return;
-    var r = this.el.getBoundingClientRect();
-    if (!atW && (!r.width || !r.height)) return;
-    if (!force && Math.round(r.width) === this.w && Math.round(r.height) === this.h) return;
-    this.pending = true;
-    var self = this;
-    requestAnimationFrame(function () {
-      self.pending = false;
-      var force = self._force; self._force = false;
-      var r2 = self.el.getBoundingClientRect();
-      var w = self._wantW || Math.round(r2.width);
-      var h = self._wantH || Math.round(r2.height);
-      if (!w || !h) return;
-      /* the size is only CLAIMED once its maps actually exist */
-      if (!force && w === self.w && h === self.h) return;
-      self.w = w; self.h = h;
-      if (!self.built) self._build();
-
-      var radius = self.o.radius === 'pill'
-        ? h / 2
-        : Math.min(parseFloat(getComputedStyle(self.el).borderRadius) || h / 2, h / 2);
-      var thick = self.o.thickness ? self.o.thickness(h) : h / 2;
-      var strength = self.o.strength == null ? 205 : self.o.strength;
-
-      var bbox = self.o.units === 'bbox';
-      var mw = bbox ? 1 : w, mh = bbox ? 1 : h;
-
-      var du = buildDisplacement(w, h, radius, thick, strength);
-      self.dmap.setAttribute('href', du);
-      self.dmap.setAttributeNS('http://www.w3.org/1999/xlink', 'href', du);
-      self.dmap.setAttribute('width', mw); self.dmap.setAttribute('height', mh);
-
-      var su = buildSpecular(w, h, radius, self.o.rim == null ? 3.5 : self.o.rim);
-      self.smap.setAttribute('href', su);
-      self.smap.setAttributeNS('http://www.w3.org/1999/xlink', 'href', su);
-      self.smap.setAttribute('width', mw); self.smap.setAttribute('height', mh);
-
-      if (!bbox) {
-        self.filter.setAttribute('x', 0); self.filter.setAttribute('y', 0);
-        self.filter.setAttribute('width', w); self.filter.setAttribute('height', h);
-      }
-      /* scale is a length, so in objectBoundingBox primitive units it is a
-         FRACTION of the box rather than pixels -- passing 34 there would
-         displace by 34x the element's width and the drop would vanish. */
-      var sc = self.o.scale == null ? 78 : self.o.scale;
-      if (bbox) sc = sc / w;
-      self.disp.forEach(function (d) { d.setAttribute('scale', sc * d._k); });
-      self.el.classList.add(self.o.cls || 'lg-lensed');
-    });
-  };
-
   /* the panel's own controls can switch the material off underneath us */
   function stillLens() {
     return !reduceTransparency.matches &&
@@ -1150,8 +1140,345 @@
            root.getAttribute('data-a11y-contrast') !== '2';
   }
 
-  var navGlass = new Glass(nav, 'lgNavLens', { scale: 78, strength: 205 });
-  function refreshLens() { navGlass.refresh(); }
+  /* ---- ONE MATERIAL, IN REAL UNITS -------------------------------------
+     These four numbers are the glass this whole site is cut from.
+
+     They are in PIXELS, not in fractions of whatever element is wearing them,
+     and that is the point. Glass has a thickness; a wide pane and a small chip
+     cut from the same sheet have the same edge. Expressing the bezel as "42%
+     of the height" made the nav look right and would have made a 677px hero
+     panel into a fishbowl with a 280px rim, and a 40px chip into something
+     with no flat middle at all. Same sheet everywhere means a surface can
+     change size, or a breakpoint can reshape it, and it is still made of the
+     same thing.
+
+     The values are the ones solved against the reference bar (a ~17px fold at
+     each long edge of a 94px bar) -- so the nav is unchanged by moving to real
+     units, and everything else on the site now matches it. */
+  var GLASS = { profile: 'squircle', bezel: 40, thickness: 66, gap: 12, ior: 1.5 };
+
+  /* ---- THE SAME EDGE, FOR SURFACES THAT CANNOT CARRY A FILTER ----------
+     Buttons and chips sit on the flat page, where a displacement lens returns
+     the field it was given -- that is settled, and putting one on every button
+     is precisely the mistake that made the site crawl. But the LIGHT on a
+     bezel does not need a backdrop to exist. It only needs the shape.
+
+     So the rim is generated here, from the same squircle profile, the same
+     bevel slope and the same light vector the specular map uses, and handed to
+     the stylesheet as one conic gradient. Every button is then lit as though
+     it were cut from the sheet described by GLASS -- because the numbers it is
+     lit by are literally that sheet -- while costing one gradient rather than
+     a filter graph and a backdrop root.
+
+     The slope is taken at the bezel's peak displacement: the middle of the
+     curve rather than its vertical lip or its flat shoulder, which is the
+     angle a real bevel reads as. */
+  function bezelRimGradient(steps) {
+    var geo = { profile: GLASS.profile, ior: GLASS.ior,
+                bezel: GLASS.bezel, thickness: GLASS.thickness, gap: GLASS.gap };
+    var sol = solveBezel(geo);
+    var peak = 0, best = -1;
+    for (var i = 0; i < sol.n; i++) if (sol.off[i] > best) { best = sol.off[i]; peak = i; }
+    var slope = sol.slope[peak];
+    var iv = 1 / Math.sqrt(1 + slope * slope);
+    var lx = -0.56, ly = -0.71, lz = 0.43, spec = 2.2;
+    /* Two passes, because the interesting part is the SHAPE of the falloff and
+       clamping destroys it. At this bevel angle the raw response runs well past
+       1 for most of the lit side, so clamping flattened the whole upper arc to
+       solid white and the highlight stopped having a direction at all -- the
+       brightest point came out at twelve o'clock instead of up-and-left where
+       the light actually is. Normalising to the peak keeps the gradient and
+       makes PEAK the only thing that needs choosing. */
+    var raw = [], max = 0, k, a;
+    for (k = 0; k <= steps; k++) {
+      /* CSS conic angles run clockwise from 12 o'clock; screen y points down,
+         so the outward normal at that angle is (sin, -cos). */
+      var phi = (k / steps) * Math.PI * 2;
+      var nx = Math.sin(phi), ny = -Math.cos(phi);
+      var facing = slope * iv * (nx * lx + ny * ly) + iv * lz;
+      var lit = facing > 0 ? facing : 0;
+      var bounce = (facing < 0 ? -facing : 0) * 0.42;
+      a = (1 - iv) * (lit + bounce) * spec;
+      raw.push(a);
+      if (a > max) max = a;
+    }
+    var PEAK = 0.82;
+    var stops = [];
+    for (k = 0; k <= steps; k++) {
+      a = max > 0 ? raw[k] / max : 0;
+      a = a * a * (3 - 2 * a) * PEAK;             /* smoothstep, then scale */
+      stops.push('rgba(255,255,255,' + a.toFixed(3) + ') ' + Math.round(k / steps * 360) + 'deg');
+    }
+    return 'conic-gradient(' + stops.join(',') + ')';
+  }
+  try {
+    root.style.setProperty('--lg-rim-conic', bezelRimGradient(24));
+  } catch (e) { /* the stylesheet has a flat fallback */ }
+
+  /* ---- SHARED FILTERS ---------------------------------------------------
+     The maps depend on the element's SIZE and CORNER RADIUS and on nothing
+     else about it -- not its colour, not its content, not where it sits. So
+     two surfaces that measure the same can point at the same filter, and the
+     four trust chips on the hero, which are identical, cost one filter between
+     them rather than four.
+
+     Keyed on rounded dimensions: a 1px reflow difference between two chips is
+     not a different piece of glass, and letting it mint a second filter would
+     defeat the whole cache on exactly the surfaces it is meant to help. */
+  var filters = {};      /* key -> { id, scale } */
+  var filterSeq = 0;
+
+  /* A map does not need a pixel for every pixel of the surface. What it has to
+     resolve is the BEZEL, and past a certain size the bezel is comfortably
+     wide in map space even at half scale -- feImage stretches the result back
+     with preserveAspectRatio="none". Uniformly, though: scaling x and y by
+     different factors would give the shape a different bezel width on its
+     long side than on its short one, which is a real distortion rather than a
+     saving. Left uncapped, the hero panel alone is a ~1000x780 map built twice
+     over with four SDF evaluations a pixel -- about six million of them, on
+     the main thread, during scroll. */
+  var MAP_MAX = 420;
+  /* the bezel is never allowed to be resolved by fewer than this many pixels */
+  var MIN_BEZEL_PX = 24;
+
+  function lensFor(w, h, radius) {
+    var key = Math.round(w) + 'x' + Math.round(h) + 'r' + Math.round(radius);
+    if (filters[key]) return filters[key];
+
+    /* Capping the long edge alone quietly wrecked the thin surfaces: the nav
+       is 1216x94, so MAP_MAX/1216 built its map at 420x32 and stretched it
+       back nearly 3x. A 40px bezel came out of that as 14 map pixels smeared
+       over 40 real ones, which is visible as banding across the edge -- the
+       exact thing the pre-blur exists to hide, reintroduced by the cap meant
+       to make it cheap. So the scale also has a FLOOR: whatever else happens,
+       the bezel keeps enough pixels to be a gradient rather than a staircase. */
+    var ms = Math.min(1, MAP_MAX / Math.max(w, h));
+    var floor = Math.min(1, MIN_BEZEL_PX / GLASS.bezel);
+    if (ms < floor) ms = floor;
+    var mw = Math.max(2, Math.round(w * ms)), mh = Math.max(2, Math.round(h * ms));
+    var geo = {
+      profile: GLASS.profile, ior: GLASS.ior,
+      bezel: GLASS.bezel * ms, thickness: GLASS.thickness * ms, gap: GLASS.gap * ms
+    };
+    var lim = Math.min(mw, mh) / 2 - 1;
+    if (geo.bezel > lim) geo.bezel = lim;
+    if (geo.bezel < 1) return null;                 /* too small to be glass */
+
+    var sol = solveBezel(geo);
+    var pad = Math.ceil(sol.max) + 6;
+    var mrad = Math.min(radius * ms, Math.min(mw, mh) / 2);
+    var maps = buildMaps(mw, mh, mrad, geo, sol, pad);
+    var du = maps.disp, su = maps.spec;
+
+    /* The map was built small; it is stretched back up by 1/ms, and every
+       displacement in it stretches with it -- so the scale the filter is given
+       is the simulated peak divided by ms, in the surface's own pixels. */
+    var scale = (sol.max * 2) / ms;
+    var id = 'lgLens' + (++filterSeq);
+    var NS = 'http://www.w3.org/2000/svg';
+
+    var f = document.createElementNS(NS, 'filter');
+    f.setAttribute('id', id);
+    f.setAttribute('color-interpolation-filters', 'sRGB');
+    f.setAttribute('filterUnits', 'userSpaceOnUse');
+    /* the region is the surface plus the padding, expressed at full size */
+    var fp = pad / ms;
+    f.setAttribute('x', -fp); f.setAttribute('y', -fp);
+    f.setAttribute('width', w + fp * 2); f.setAttribute('height', h + fp * 2);
+
+    function prim(tag, attrs) {
+      var e = document.createElementNS(NS, tag);
+      for (var k in attrs) if (attrs.hasOwnProperty(k)) e.setAttribute(k, attrs[k]);
+      f.appendChild(e);
+      return e;
+    }
+    function img(href, result) {
+      var e = prim('feImage', { result: result, preserveAspectRatio: 'none',
+        x: -fp, y: -fp, width: w + fp * 2, height: h + fp * 2 });
+      e.setAttribute('href', href);
+      e.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+      return e;
+    }
+
+    prim('feGaussianBlur', { 'in': 'SourceGraphic', stdDeviation: 0.7, result: 'pre' });
+    img(du, 'dmap');
+    prim('feDisplacementMap', { 'in': 'pre', in2: 'dmap', scale: scale,
+      xChannelSelector: 'R', yChannelSelector: 'G', result: 'refr' });
+    prim('feColorMatrix', { 'in': 'refr', type: 'saturate', values: 1.15, result: 'satRaw' });
+    var lift = prim('feComponentTransfer', { 'in': 'satRaw', result: 'sat' });
+    ['feFuncR', 'feFuncG', 'feFuncB'].forEach(function (fn) {
+      var t = document.createElementNS(NS, fn);
+      t.setAttribute('type', 'linear'); t.setAttribute('slope', 1.4);
+      t.setAttribute('intercept', 0.08);
+      lift.appendChild(t);
+    });
+    img(su, 'smapRaw');
+    prim('feGaussianBlur', { 'in': 'smapRaw', stdDeviation: 1, result: 'smap' });
+    prim('feComposite', { 'in': 'sat', in2: 'smap', operator: 'in', result: 'rim' });
+    prim('feBlend', { mode: 'screen', 'in': 'refr', in2: 'rim' });
+
+    ensureDefs().appendChild(f);
+    filters[key] = { id: id, scale: scale };
+    return filters[key];
+  }
+
+  /* ---- A LENSED SURFACE -------------------------------------------------
+     Holds no maps of its own. It measures itself, asks the cache for a filter
+     that fits, and writes the reference into a custom property the stylesheet
+     reads -- so which filter a surface is using is a fact about the element,
+     not something baked into a selector. */
+  function Surface(el, opts) {
+    this.el = el;
+    this.o = opts || {};
+    this.w = 0; this.h = 0;
+    this.pending = false;
+    this.visible = false;
+  }
+
+  Surface.prototype.clear = function () {
+    this.el.classList.remove('lg-lensed');
+    this.el.style.removeProperty('--lg-url');
+    this.w = this.h = 0;
+  };
+
+  Surface.prototype.refresh = function (force) {
+    if (!canLens || !stillLens()) return;
+    /* Off-screen surfaces are not measured and not built. Without this every
+       piece of glass on the page races to build its maps during load, on the
+       main thread, before anything has been painted. */
+    if (!this.visible) return;
+    if (this.pending) return;
+    var r = this.el.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    var w = Math.round(r.width), h = Math.round(r.height);
+    if (!force && w === this.w && h === this.h) return;
+    this.pending = true;
+    var self = this;
+    requestAnimationFrame(function () {
+      self.pending = false;
+      var r2 = self.el.getBoundingClientRect();
+      var w2 = Math.round(r2.width), h2 = Math.round(r2.height);
+      if (!w2 || !h2) return;
+      if (!force && w2 === self.w && h2 === self.h) return;
+      var cs = getComputedStyle(self.el);
+      var rad = self.o.radius === 'pill'
+        ? h2 / 2
+        : Math.min(parseFloat(cs.borderTopLeftRadius) || 0, Math.min(w2, h2) / 2);
+      var lens = lensFor(w2, h2, rad);
+      if (!lens) return;
+      self.w = w2; self.h = h2;
+      self.el.style.setProperty('--lg-url', 'url(#' + lens.id + ')');
+      self.el.classList.add('lg-lensed');
+      if (self.o.gc !== false) gcFilters();
+    });
+  };
+
+  /* ---- THE REGISTER -----------------------------------------------------
+     Which surfaces are glass, and why each one is on the list.
+
+     Two tests, and a surface has to pass both.
+
+     IS THERE ANYTHING BEHIND IT WORTH BENDING? A lens over a flat field
+     returns the same flat field. The cards, the thali list, the reviews and
+     the footer all sit on one cream colour, so refracting them would cost two
+     canvas maps, a filter and a compositing layer each to produce pixels
+     identical to the ones already there.
+
+     IS THE SURFACE THIN ENOUGH TO SHOW IT? This is the one I got wrong first
+     time round, and it is the more important of the two. The fold -- the
+     mirrored band where the displacement reverses -- is a fixed ~17px, because
+     the glass is a fixed thickness. On a 94px bar that is a fifth of the
+     surface and it is the whole character of the material. On the 677px hero
+     panel it is two and a half percent: invisible, while the panel pays for
+     609,000 pixels of SVG-filtered backdrop on every frame it moves. The four
+     chips on that panel were worse again -- nested inside a surface that is
+     itself backdrop-filtered, so what they had to refract was the panel's own
+     uniform blur, and nesting backdrop filters is the case engines handle
+     least well.
+
+     So the lens goes on thin floating chrome that passes over sharp content,
+     and nothing else. The panels keep the frost tiers, which is what actually
+     reads at that size, and they share this material's rim and edge so the
+     site still looks cut from one sheet. */
+  var surfaces = [];
+  function lensAll(sel, opts) {
+    [].slice.call(document.querySelectorAll(sel)).forEach(function (el) {
+      surfaces.push(new Surface(el, opts));
+    });
+  }
+
+  lensAll('#nav', { radius: 'pill' });
+  lensAll('.mobile-cta');
+  lensAll('.page-back', { radius: 'pill' });
+
+  /* Only what is on screen is built, and it is built once it is close rather
+     than once it is showing, so the material is already there when it arrives.
+     Surfaces that scroll away keep their filter -- the cache is shared and
+     tearing one down would only mean rebuilding it on the way back. */
+  var io = ('IntersectionObserver' in window) ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      var s = en.target.__lgSurface;
+      if (!s) return;
+      s.visible = en.isIntersecting;
+      if (s.visible) s.refresh();
+    });
+  }, { rootMargin: '200px' }) : null;
+
+  /* IntersectionObserver answers "is it worth building"; it does not answer
+     "has it changed shape". A panel that opens from display:none, a bar that
+     gains a row at a breakpoint, a chip whose label rewraps -- none of those
+     are scroll events and none of them are window resizes, so without this
+     they wait for some unrelated resize to come along and correct them. The
+     accessibility panel showed exactly that: correct size, right material, and
+     no lens until something else on the page happened to move. */
+  var ro = ('ResizeObserver' in window) ? new ResizeObserver(function (entries) {
+    entries.forEach(function (en) {
+      var s = en.target.__lgSurface;
+      if (s) s.refresh();
+    });
+  }) : null;
+
+  surfaces.forEach(function (s) {
+    s.el.__lgSurface = s;
+    if (io) io.observe(s.el); else s.visible = true;
+    if (ro) ro.observe(s.el);
+    if (!io && !ro) s.refresh();
+  });
+
+  /* Every distinct size mints a filter, and a window dragged slowly across a
+     breakpoint would mint one per pixel of width -- each carrying two canvas
+     maps -- with nothing ever pointing at them again. So after a build, sweep
+     the ones nothing is using. Bounded by the number of surfaces on the page
+     rather than by how much the reader has resized. */
+  function gcFilters() {
+    if (!defs) return;
+    var live = {};
+    for (var i = 0; i < surfaces.length; i++) {
+      var u = surfaces[i].el.style.getPropertyValue('--lg-url');
+      var m = u && u.match(/#([\w-]+)/);
+      if (m) live[m[1]] = 1;
+    }
+    for (var k in filters) {
+      if (!filters.hasOwnProperty(k)) continue;
+      if (live[filters[k].id]) continue;
+      var node = document.getElementById(filters[k].id);
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+      delete filters[k];
+    }
+  }
+
+  /* the two the rest of this module still talks to by name */
+  var navGlass = surfaces[0];
+  var barGlass = null;
+  for (var si = 0; si < surfaces.length; si++) {
+    if (surfaces[si].el === mobileBar) { barGlass = surfaces[si]; break; }
+  }
+
+  /* display:none surfaces measure 0 and are skipped; they build themselves the
+     first time a breakpoint actually shows them. */
+  function refreshLens() {
+    for (var i = 0; i < surfaces.length; i++) surfaces[i].refresh();
+  }
 
   /* THE DROP DOES NOT GET ITS OWN SVG LENS.
      It was given one, and it rendered as a solid grey block with a coloured
@@ -1342,6 +1669,9 @@
   var tracking = false, moved = false, startX = 0, grabDx = 0;
   var hist = [];
   var pointerId = null;
+  /* which link the press started on. A tap has to be committed explicitly --
+     see release() -- so the gesture has to remember what was pressed. */
+  var pressed = null;
 
   function linkAt(clientX) {
     var ls = links(), best = null, bestD = Infinity;
@@ -1366,11 +1696,15 @@
     var a = e.target.closest && e.target.closest('.nav-link');
     if (!a) return;
     tracking = true; moved = false; pointerId = e.pointerId;
+    pressed = a;
     startX = e.clientX;
     hist = [{ x: e.clientX, t: performance.now() }];
     var r = rectOf(a);
     grabDx = (e.clientX - row.getBoundingClientRect().left) - r.x;
-    row.setPointerCapture(e.pointerId);
+    /* Guarded: setPointerCapture throws NotFoundError for a pointerId with no
+       active pointer behind it. Unguarded it took the rest of this handler
+       with it, leaving `tracking` true but the press never shown. */
+    try { row.setPointerCapture(e.pointerId); } catch (err) {}
     nav.classList.add('lg-pressing');
     /* §1: feedback on the press itself, not on release */
     springTo(a);
@@ -1415,7 +1749,28 @@
     if (!tracking || (e && e.pointerId !== pointerId)) return;
     tracking = false;
     nav.classList.remove('lg-pressing', 'lg-sliding');
-    if (!moved) return;                              /* a plain tap: let it click */
+    /* Hand the capture back first. While the row holds it, every pointer event
+       retargets to the row -- and so does the click the browser synthesises
+       afterwards, which lands on the <ul> instead of on the <a> inside it. */
+    if (e && row.hasPointerCapture && row.hasPointerCapture(e.pointerId)) {
+      row.releasePointerCapture(e.pointerId);
+    }
+
+    /* A PLAIN TAP HAS TO BE COMMITTED BY HAND.
+       This used to return here and let the browser's own click do the work,
+       which is correct for an ordinary link and wrong for this one: the
+       pointer capture taken on pointerdown -- the thing that lets a drag keep
+       following the finger past the edge of the item it started on -- also
+       retargets the click to the row. So the <a> never saw a click, its
+       default action never ran, and every tap on the bar did nothing at all
+       except spring the drop. The drag worked, which is what hid it: only the
+       plain tap, the thing people actually do, was dead.
+
+       commit() is the same path a slide-and-release already takes, so a tap
+       and a drag now end the same way. It sets `swallow`, so if a click does
+       reach the link on some other engine it is suppressed rather than
+       navigating twice. */
+    if (!moved) { if (pressed) commit(pressed); return; }
 
     /* §5 + §6: carry the release velocity, and land where the throw is
        GOING rather than where the finger happened to lift */
@@ -1510,8 +1865,16 @@
        note where pillGlass is declared), so there is no second class to keep
        in step here. Restored only if the maps actually exist: .w is set once a
        build has succeeded. */
-    if (!stillLens() || !canLens) { nav.classList.remove('lg-lensed'); return; }
-    if (navGlass.w) nav.classList.add('lg-lensed');
+    var i;
+    if (!stillLens() || !canLens) {
+      for (i = 0; i < surfaces.length; i++) surfaces[i].el.classList.remove('lg-lensed');
+      return;
+    }
+    /* restored only where the maps actually exist: .w is set once a build has
+       succeeded, and a surface that has never been on screen has none */
+    for (i = 0; i < surfaces.length; i++) {
+      if (surfaces[i].w) surfaces[i].el.classList.add('lg-lensed');
+    }
   }
   new MutationObserver(syncLensClasses)
     .observe(root, { attributes: true, attributeFilter: ['class', 'data-a11y-contrast'] });

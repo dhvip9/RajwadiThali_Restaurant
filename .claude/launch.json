@@ -4,15 +4,44 @@
     {
       "name": "rajwadi-dine",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8777", "--bind", "127.0.0.1", "--directory", "site"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8777",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "site"
+      ],
       "port": 8777
     },
     {
       "name": "rajwadi-catering",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8778", "--bind", "127.0.0.1",
-                      "--directory", "../RajwadiThali_catering/site"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8778",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "../RajwadiThali_catering/site"
+      ],
       "port": 8778
+    },
+    {
+      "name": "liquid-glass",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "--prefix",
+        "/Users/dhvippatel/Documents/liquid-glass",
+        "dev",
+        "--",
+        "--port",
+        "3111"
+      ],
+      "port": 3111
     }
   ]
 }
