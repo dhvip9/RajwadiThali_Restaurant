@@ -340,9 +340,45 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    The surfaces that sit on a PHOTOGRAPH — .hero-glass and its chips — are
    deliberately not in this list. Their backdrop has real detail at the blur's
    scale, so for them the blur is the effect and it stays. */
+/* ---- .card, .thali AND .menu-item ARE NOT IN THIS LIST ANY MORE ----------
+   They were, and they were paying for nothing. Measured against a control
+   build with these filters disabled -- two fresh loads, real Safari, diffed
+   per element -- the surfaces that sit on the flat cream sections come out at:
+
+       li.menu-item    0.00      article.thali   0.01
+       article.card    0.92      a.footer-cta    0.17
+
+   Zero, on about fifty elements. A saturate over one flat colour returns
+   almost the colour it was given, which is exactly what the note above
+   predicted; what it did not say is that the effect is not merely small but
+   absent, while the cost is not.
+
+   The cost is a backdrop root and a separate render surface per element, and
+   li.menu-item alone is ~45 of them. Dropping the three selectors that measure
+   zero removes roughly 51 backdrop roots from this page for no visible change.
+
+   .review and .faq STAY. They measured 1.06 -- small, but not zero, and the
+   brief was not to change colours. The same reasoning keeps .notes, which was
+   not measured at all: an unmeasured surface is not a proven no-op.
+
+   .trust-item is untouched and stays on its own 145% rule below: it measured
+   2.59 against the control, reproducing an earlier independent run's 2.58. It
+   sits on the hero PHOTOGRAPH rather than on flat colour, which is precisely
+   the distinction the original note drew -- and it is the reason this edit is
+   three selectors rather than the whole rule. */
 .card, .thali, .review, .menu-item, .faq, .notes {
   backdrop-filter: saturate(165%);
   -webkit-backdrop-filter: saturate(165%);
+}
+/* ...and OFF entirely for the three that measured zero. Not removed from the
+   list above -- that was tried and it was wrong. This rule does not ADD a
+   filter to these surfaces, it SUPPRESSES the much heavier .glass blur they
+   would otherwise inherit; dropping them out of it sent eleven elements to
+   blur(20px), which is both a visual change and the opposite of a saving.
+   Switching them off explicitly is what the control build actually measured. */
+.card, .thali, .menu-item {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .glass--thin {
   --_frost: var(--g1-frost);
@@ -1564,6 +1600,20 @@ a.footer-rest-cta:hover .footer-rest-arrow { transform: translateX(3px); transit
        paragraph text is the hardest thing to sit a transparent surface on. */
     backdrop-filter:
       blur(var(--bar-lens-frost, 7px)) saturate(var(--bar-sat, 180%)) var(--lg-url, opacity(1));
+    /* ---- AND THE SAME DECLARATION AGAIN, WITHOUT THE REFERENCE ----
+       WebKit does not "keep the blur and discard the url()". It parses the
+       whole chain -- the reference survives all the way into the computed
+       value, which is what made this look supported -- and then renders NONE
+       of it. A backdrop-filter carrying a url() is not a weaker frost in
+       Safari; it is no frost at all.
+
+       The top bar has always had this second declaration and that is the only
+       reason its glass survived; this bar never did, which is why the body
+       copy ran straight through it while the bar above it frosted correctly.
+       Declared after the unprefixed one so WebKit takes it, and ignored by
+       Chromium, which does not let the alias win over `backdrop-filter`. */
+    -webkit-backdrop-filter:
+      blur(var(--bar-copy-frost, 14px)) saturate(var(--bar-sat, 180%));
     transition: background-color .45s ease;
   }
   /* the bar is light like the page; it only darkens while it overlaps a hero */
@@ -2336,13 +2386,127 @@ html[data-a11y-text] :is(#nav, .nav-mobile) .logo-tagline { font-size: 9.28px; }
 /* the filter lives in the document but must never take space or be read out */
 .lg-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 
+/* ---- the copied backdrop (Safari, Firefox) ----
+   WebKit and Gecko parse `url()` inside backdrop-filter and then throw the
+   filter away (webkit.org/b/245510), so on those engines main.js puts the very
+   same filter on a COPY of the page instead, mounted here as one host element
+   per lensed surface. The host is position:fixed over exactly the surface's
+   box, clipped to its radius, and sits one z-index below it -- which is what a
+   backdrop is. Everything inside it lives in a closed shadow root; the only
+   thing this stylesheet can say about it is where it goes.
+
+   Geometry, radius, z-index and the filter reference are all written from
+   main.js, because every one of them is a fact about the surface it is
+   standing in for rather than a fact about the page. */
+.lg-refract {
+  position: fixed;
+  left: 0; top: 0; width: 0; height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* paint containment is what keeps this from being a second render of the
+     whole document: the copy is document-sized, the window onto it is a bar */
+  contain: layout paint style;
+  /* ---- AND THE HOST IS WHAT WEARS THE LENS ----
+     Not a layer inside the shadow root, which is where this lived first and
+     where it did nothing. An feImage-driven filter renders nothing at all when
+     it is applied inside a shadow tree -- measured in both engines -- and
+     feImage is what carries the displacement and specular maps, so the whole
+     lens depends on it. The host is an ordinary light-DOM element, so the
+     filter resolves and feImage works.
+
+     Applying it here also decides what the filter has to chew on. The host is
+     `overflow:hidden` and clipped to the glass's own rounded rect, so the
+     source graphic is a bar-sized slice; on the inner layer it was the entire
+     cloned document, 32 megapixels at 2x to paint an 83px strip.
+
+     main.js writes all three custom properties onto this element. The
+     fallbacks matter for the same reason they do on the surface itself: an
+     unset --lg-url would invalidate the whole declaration at computed-value
+     time and take the frost down with the bend, so it falls back to a filter
+     function that does nothing. */
+  filter:
+    saturate(var(--lg-copy-sat, 180%))
+    var(--lg-url, opacity(1));
+}
+
+/* Which frost the copy wears. The numbers stay where they were declared — this
+   only gives the copy a name it can read them under, since it is mounted
+   outside the surface and inherits none of its custom properties. */
+#nav.lg-lensed        { --lg-copy-frost: var(--nav-lens-frost, 6px); --lg-copy-sat: var(--nav-sat, 180%); }
+.page-back.lg-lensed  { --lg-copy-frost: var(--lg-frost, 10px);      --lg-copy-sat: var(--lg-sat, 165%); }
+.mobile-cta.lg-lensed { --lg-copy-frost: var(--bar-lens-frost, 7px); --lg-copy-sat: var(--bar-sat, 180%); }
+
+/* And the surface itself stops filtering its backdrop. Not an optimisation —
+   a correction. Everything its backdrop-filter would have blurred is now in
+   the copy directly underneath, already blurred and already bent; filtering
+   again would blur the copy a second time and soften the fold back out, which
+   is the one thing the fold is for. The tint, border and shadow stay: they are
+   painted by the surface, over the copy, in the order a backdrop composites. */
+/* ---- THE FROST IS NEVER TRADED AWAY -------------------------------------
+   This rule used to set `backdrop-filter: none` here, on the promise that the
+   copy underneath would do that job instead. That promise is the whole bug in
+   the Safari screenshots, because it is made BEFORE anything has checked that
+   the copy can keep it -- and when it cannot, the surface has already given up
+   the one thing that was working. What is left is a tint over a pin-sharp
+   page: no frost, no bend, no glass.
+
+   And it cannot be checked. Whether WebKit will actually render an SVG
+   reference filter is not a question CSS.supports() can answer: measured here,
+   the very same filter renders perfectly on a plain element and on a copy
+   whose content is a flat pattern, and renders nothing once the copy holds the
+   real cloned page. Computed style says `url(#lgLens1)` throughout. The lens
+   renders or it does not, and nothing in the page is told which.
+
+   So the trade is off. The surface keeps its own backdrop-filter, which is
+   native, accelerated, and has never been the part that failed; the copy adds
+   the bend on top of it where the bend is available. The cost is that the
+   surface's blur lands on top of the fold and softens it -- the bend is the
+   thing that loses here, and it loses on purpose. Frost that always works
+   beats a bend that usually does not.
+
+   The copy drops its own blur to pay for this: see .lg-refract. Blurring there
+   AND here would frost the same pixels twice. */
+#nav.lg-lensed.lg-copy,
+.page-back.lg-lensed.lg-copy,
+.mobile-cta.lg-lensed.lg-copy {
+  /* deliberately empty of filter declarations -- the surface keeps what the
+     .lg-lensed rules gave it */
+  isolation: auto;
+}
+
+/* ---- AND IT KEEPS THE FULL FROST, NOT THE LENSED ONE --------------------
+   Each of these surfaces carries two frost values: the weight it wears alone,
+   and a much lighter one for when a bend is doing part of the work of hiding
+   the backdrop. The lighter value is only correct if the bend actually
+   arrived. On the copy path nothing can confirm that it did, so the honest
+   assumption is that it did not, and the surface goes back to the weight it
+   wears with no lens at all.
+
+   The top bar already resolves this on its own -- its .lg-lensed rule declares
+   -webkit-backdrop-filter with the full --nav-frost, and in WebKit that alias
+   is the one that wins -- so only the other two need saying. */
+
+.page-back.lg-lensed.lg-copy  { --lg-frost: 16px; }
+
+/* The copy is a moving optical effect over live content, so it answers to the
+   same switches the lens does — and it answers by leaving, since there is no
+   reduced version of "a second copy of the page". */
+@media (prefers-reduced-transparency: reduce) { .lg-refract { display: none; } }
+@media (prefers-contrast: more) { .lg-refract { display: none; } }
+@media print { .lg-refract { display: none; } }
+html.a11y-noimg .lg-refract,
+html[data-a11y-contrast="2"] .lg-refract,
+html[data-a11y-opacity="4"] .lg-refract { display: none; }
+
 /* ---- refraction ----
-   Applied only once main.js has confirmed the browser renders url() inside
-   backdrop-filter (Chromium does; Safari and Firefox support backdrop-filter
-   but drop the whole declaration when it contains a filter reference, which
-   would take the blur down with it). Blur drops from 26px to 13px here on
-   purpose: refraction you cannot see through is just noise, so the material
-   gets its depth from the bend and the highlights instead of from fog. */
+   .lg-lensed means the surface has a working lens, not that it got one from
+   backdrop-filter. Chromium is the only engine that renders url() inside
+   backdrop-filter, so it is the only one these declarations do anything for;
+   WebKit and Gecko take .lg-copy alongside, which turns the backdrop-filter
+   off entirely and moves the identical filter onto the copied backdrop above.
+   Blur drops from 26px to 13px here on purpose: refraction you cannot see
+   through is just noise, so the material gets its depth from the bend and the
+   highlights instead of from fog. */
 /* Lensed: refraction AND frost, in that order. */
 #nav.lg-lensed {
   /* This rule used to carry no blur at all, on the argument that frost and
@@ -2371,9 +2535,25 @@ html[data-a11y-text] :is(#nav, .nav-mobile) .logo-tagline { font-size: 9.28px; }
      it, and a lighter blur leaves the edge band legible as an edge. */
   backdrop-filter:
     blur(var(--nav-lens-frost, 6px)) saturate(var(--nav-sat, 180%)) var(--lg-url, opacity(1));
+  /* --nav-copy-frost, not --nav-frost. The unprefixed value above is what
+     Chromium wears, where the bend hides the backdrop and the blur only has to
+     soften it. WebKit takes this line instead, and it had been wearing the
+     FULL unlensed frost -- 14px -- which is a different material: an opaque
+     white capsule rather than a pane of glass. It also hid the one thing worth
+     showing, because a 14px blur flattens the backdrop before the fold at the
+     edge can bend anything legible into it. Clear in the middle, bent at the
+     caps, is what the reference actually does. */
   -webkit-backdrop-filter:
-    blur(var(--nav-frost, 16px)) saturate(var(--nav-sat, 180%));
+    blur(var(--nav-copy-frost, var(--nav-frost, 16px))) saturate(var(--nav-sat, 180%));
 }
+
+/* ---- CLEAR IN THE MIDDLE, BENT AT THE EDGE ----------------------------
+   Two blurs stack on the copy path and both were set for hiding rather than
+   for showing: this one over the copy, and --lg-copy-frost inside it. Together
+   they made the bar milky end to end. Dropped to a thickness you can see
+   through, so the middle reads as glass over live content and the caps carry
+   the effect -- which is where a real lens puts it. */
+#nav.lg-lensed.lg-copy { --nav-copy-frost: 4px; --lg-copy-frost: 2px; }
 
 /* ---- what the lens REPLACES ----
    These three layers — the broad sheen, the diagonal streak, and most of the
@@ -2389,13 +2569,128 @@ html[data-a11y-text] :is(#nav, .nav-mobile) .logo-tagline { font-size: 9.28px; }
    they wash the mirrored edge back out to nothing. That is why the bend kept
    reading as weaker than the maps said it was.
 
-   Only under .lg-lensed. Safari and Firefox never get the filter, so for them
-   these layers are still the whole effect and they stay exactly as they were. */
+   Only under .lg-lensed, which now means every engine -- Safari and Firefox
+   reach it by the copied backdrop rather than by backdrop-filter, but they
+   reach it, and the filter's specular map is the same one. These layers stay
+   only where there is no lens at all. */
 #nav.lg-lensed .nav-sheen,
 #nav.lg-lensed::after { display: none; }
+/* ...but only where the lens is REALLY delivering a specular map, which is the
+   backdrop path. On the copy path the filter may or may not have run, and a
+   bar with neither a painted highlight nor a rendered one is the flat bar this
+   whole section exists to avoid. */
+#nav.lg-lensed.lg-copy .nav-sheen { display: block; }
+/* ...but NOT the diagonal blob. ::after is a broad white radial parked at
+   left:-15%, which lands squarely on the left cap -- the one place the fold is
+   trying to gather dark. It was restored here when the copy path had no
+   highlight of its own, and it has been fighting the fold ever since: with the
+   fold painting a .46 black lip, the cap still measured +4.38 against
+   Chromium's -10.35, because this was re-lighting it from on top.
+
+   Chromium hides it for the same reason it hides .nav-sheen -- the lens draws
+   its own specular. The copy path now has the painted fold and the conic ring
+   at full strength, so it no longer needs a hand-placed blob, and keeping one
+   costs the cap its polarity. */
+#nav.lg-lensed.lg-copy::after { display: none; }
 /* the conic ring stays, at a whisper: it carries the bar's outline where the
    specular falls off, on the shaded side away from the light */
 #nav.lg-lensed::before { opacity: .5; }
+#nav.lg-lensed.lg-copy::before { opacity: 1; }
+
+/* ---- THE EDGE, PAINTED, WHERE IT CANNOT BE REFRACTED --------------------
+   Chromium gets its rim from the filter: a displacement map folds the backdrop
+   into the two short ends, and that mirrored band is most of what reads as
+   glass thickness. WebKit will not run a reference filter over a backdrop at
+   all, so on the copy path that band never arrives -- measured against
+   Chromium, the lens contributes 6.05 at the left rim and 4.21 at the right,
+   against 1.33 and 0.86 here. Edges weaker than the middle, which is the exact
+   inverse of what refraction does.
+
+   This does not simulate a displacement map, and it should not pretend to.
+   What it paints is the part of the effect the eye actually reads: light
+   compressing toward the caps, where a thick edge gathers and folds it. A
+   gradient cannot bend the backdrop, but it can put the brightness where the
+   bend would have put it, and at this size that is the difference between a
+   flat capsule and one with a thickness to it.
+
+   Scoped to .lg-copy, so Chromium -- which has the real thing -- never sees
+   it, and scaled by --nav-sheen so it follows the theme: the light bar halves
+   the value, because the same white on white glass is fog rather than an edge.
+   `screen` keeps it additive over dark warm backdrops instead of milky.
+
+   .nav-sheen already carries `overflow:hidden` and `border-radius:inherit`, so
+   this rides the pill's caps rather than squaring them off. */
+/* The painted fold is the FALLBACK now. Where main.js has mounted the real
+   mirrored bands it adds .lg-fold, and this stands down -- otherwise a flat
+   gradient sits on top of a mirror of the actual page and washes it out. It
+   still carries the caps below FOLD_MIN_WIDTH, where the bands are too
+   expensive to mount. */
+#nav.lg-lensed.lg-copy.lg-fold .nav-sheen::after { display: none; }
+#nav.lg-lensed.lg-copy .nav-sheen::after {
+  content: ''; position: absolute; inset: 0;
+  border-radius: inherit; pointer-events: none;
+  /* Narrow and thin, because that is what the real one is. Measured against
+     Chromium the fold is about 17px at each cap and it does NOT wash the end
+     out -- its broad brightness lift over the middle of the bar is close to
+     zero. The first version of this was 78px wide at .95 alpha and lifted the
+     caps by 36 against Chromium's 0.2: a milky blob where the reference has a
+     bright line. Kept tight to the edge so it reads as the lit face of a thick
+     rim rather than as fog gathering in the corner. */
+  background: linear-gradient(90deg,
+    var(--fold-lip, rgba(255,255,255,.10)) 0,
+    var(--fold-mid, rgba(255,255,255,.04)) 7px,
+    var(--fold-in,  transparent) 16px,
+    transparent 32px,
+    transparent calc(100% - 32px),
+    var(--fold-in,  transparent) calc(100% - 16px),
+    var(--fold-mid, rgba(255,255,255,.04)) calc(100% - 7px),
+    var(--fold-lip, rgba(255,255,255,.10)) 100%);
+  /* ---- A FOLD IS NOT A HIGHLIGHT, AND IT IS NOT ALWAYS BRIGHT ----
+     Refraction MIRRORS the backdrop, so which way the cap goes is a fact about
+     what is behind the glass, not about the glass. Measured against Chromium,
+     whose lens does the real thing: over the dark hero photo its cap comes out
+     10.35 DARKER than the middle of the bar; over the cream section it comes
+     out 6.67 BRIGHTER. Same filter, opposite sign, because the content flipped.
+
+     The first version of this painted white in both states. That matched the
+     light section and actively contradicted the dark one -- Chromium at -10.35
+     against this at +4.14, a cap that lit up where the reference dimmed.
+
+     A gradient cannot read its own backdrop, so it cannot track that the way a
+     displacement map does. What it CAN do is follow the theme, and the theme
+     is already a decent proxy for the backdrop: nav-theme-dark means the bar
+     is over the photograph, nav-theme-light means it is over the cream. So the
+     polarity is set per theme below, and the sign comes out right in both.
+
+     The ceiling is worth naming: this tracks the THEME, not the pixels. A
+     backdrop that changes brightness under a stationary bar will not flip it. */
+  mix-blend-mode: normal;
+}
+
+/* Over the photograph the fold gathers dark, as Chromium's does: the lip goes
+   down, with a thin lift just inside it so the edge still has a lit face. */
+#nav.lg-lensed.lg-copy.nav-theme-dark {
+  --fold-lip: rgba(0, 0, 0, .29);
+  --fold-mid: rgba(0, 0, 0, .13);
+  --fold-in:  rgba(255, 255, 255, .05);
+}
+/* Over cream it gathers light, and the dark sits just inside instead. */
+#nav.lg-lensed.lg-copy.nav-theme-light {
+  --fold-lip: rgba(255, 255, 255, .78);
+  --fold-mid: rgba(255, 255, 255, .36);
+  --fold-in:  rgba(0, 0, 0, .05);
+  /* the light bar's reflection measured 2.94 against Chromium's 7.00 -- the
+     same white on white glass reads as fog, so the theme halves it and on the
+     copy path there is no specular map to make up the difference */
+  --nav-sheen: .26;
+}
+
+/* The bottom bar does NOT get this. Its ::after is the top hairline and its
+   ::before is the fade above it -- both load-bearing -- and it has no spare
+   child to hang a layer on. It also does not need one: measured against
+   Chromium its bar is already a visual match, and clobbering a working light
+   layer to chase a band that is a few pixels tall on a shallow bar is a bad
+   trade. The nav is a capsule with real caps; that is where the edge reads. */
 
 /* The mobile sheet is a MENU, not a lens: a modal task over arbitrary content
    that simply has to be read, so it keeps its near-opaque fill and a modest
@@ -2603,7 +2898,16 @@ html.a11y-motion .nav-active-pill.lg-spring { --lg-speed: 0 !important; }
 /* The accessibility panel's own switches, which the media queries cannot see */
 html.a11y-motion .lg-bloom,
 html.a11y-motion .lg-rim { --lg-mx: 50% !important; --lg-my: 50% !important; transition: none; }
-html.a11y-noimg #nav.lg-lensed { backdrop-filter: blur(26px) saturate(200%); }
+/* Paired, like every other backdrop-filter in this file. Safari 18+ honours
+   the unprefixed property, so this rule was not broken on current Safari --
+   but it was the only glass declaration in the stylesheet without its alias,
+   and on any WebKit that predates unprefixed support it would silently fall
+   back to the lighter --nav-frost from the .lg-lensed rule instead of the
+   heavier frost this state asks for. */
+html.a11y-noimg #nav.lg-lensed {
+  backdrop-filter: blur(26px) saturate(200%);
+  -webkit-backdrop-filter: blur(26px) saturate(200%);
+}
 html[data-a11y-contrast="2"] .lg-bloom { display: none !important; }
 html[data-a11y-contrast="2"] .lg-rim { opacity: 1 !important; -webkit-mask-image: none !important; mask-image: none !important; }
 

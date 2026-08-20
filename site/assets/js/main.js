@@ -799,11 +799,12 @@
 
    1. REFRACTION. The part that actually reads as glass rather than as a
       frosted panel: content behind the bar is BENT at the rim. Done with an
-      SVG displacement map fed to backdrop-filter, the map generated here on a
-      canvas from the bar's own rounded-rect geometry. Chromium-only in
-      practice -- Safari and Firefox support backdrop-filter but not url()
-      inside it -- so it is feature-detected and simply not applied elsewhere,
-      where the layered highlights below already carry the material.
+      SVG displacement map generated here on a canvas from the bar's own
+      rounded-rect geometry, then delivered by whichever route the engine
+      leaves open: straight onto the live backdrop in Chromium, and onto a
+      clipped copy of the backdrop in WebKit and Gecko, which parse url()
+      inside backdrop-filter and then discard it. Same maps, same bend, two
+      subjects -- see THE SAME LENS, WHERE THE BACKDROP CANNOT CARRY ONE.
 
    2. SPECULAR. A light source that follows the pointer: a soft bloom across
       the surface and a bright rim that lights only the arc nearest the
@@ -1112,15 +1113,66 @@
     return { disp: dc.toDataURL('image/png'), spec: sc.toDataURL('image/png') };
   }
 
-  /* backdrop-filter accepts url() per spec, but only Chromium actually renders
-     an SVG filter there; the others silently drop the whole declaration, which
-     would take the blur with it. Ask first. */
-  var canLens = (function () {
-    if (!window.CSS || !CSS.supports) return false;
-    if (!CSS.supports('backdrop-filter', 'blur(1px)') &&
-        !CSS.supports('-webkit-backdrop-filter', 'blur(1px)')) return false;
-    return CSS.supports('backdrop-filter', 'url(#x) blur(1px)');
-  })();
+  /* ---- WHICH LENS THIS ENGINE CAN ACTUALLY WEAR ------------------------
+     `backdrop-filter: url(#f)` is in the spec, and every engine's PARSER
+     accepts it. Only Chromium renders it. WebKit has had the bug open since
+     2022 (webkit.org/b/245510): it parses the declaration, keeps the blur, and
+     silently discards the filter reference.
+
+     Which means CSS.supports() cannot be asked, and asking it is what was
+     wrong here. Measured on Safari 26.5:
+
+         CSS.supports('backdrop-filter', 'url(#x) blur(1px)')   ->  true
+         ...and no bend appears.
+
+     That false positive was the whole of "the refraction does not work in
+     Safari", and it was worse than it sounds. `canLens` came back true, every
+     surface took .lg-lensed, and the .lg-lensed rules in the stylesheet switch
+     the hand-painted sheen OFF and dim the conic rim -- correctly, on the
+     grounds that the filter's own specular map has replaced them. In Safari
+     the filter never arrived. So Safari was not falling back to the painted
+     material; it was losing the painted material AND getting no refraction,
+     which is exactly why the bar read flatter there than anywhere else.
+
+     So the engine is identified instead, and it is identified POSITIVELY on
+     both sides rather than by sniffing a version out of the UA string:
+
+       Blink   backdrop-filter carries the filter. Nothing else does today.
+       WebKit  window.GestureEvent, and -apple-pay-button-style, exist in no
+               other engine.
+       Gecko   -moz-osx-font-smoothing likewise.
+
+     A wrong answer either way is not fatal, because the second path below is
+     not a downgrade -- it is the same filter, delivered differently -- so if
+     WebKit ships the fix tomorrow nothing here needs to know. */
+  function supports(prop, val) {
+    try { return !!(window.CSS && CSS.supports && CSS.supports(prop, val)); }
+    catch (e) { return false; }
+  }
+
+  var isWebKit = !!window.GestureEvent || supports('-apple-pay-button-style', 'black');
+  var isGecko  = supports('-moz-osx-font-smoothing', 'grayscale');
+
+  var hasBackdrop = supports('backdrop-filter', 'blur(1px)') ||
+                    supports('-webkit-backdrop-filter', 'blur(1px)');
+
+  /* Chromium: the filter goes straight onto the live backdrop, which is both
+     free of a second render pass and exact. Kept as the preferred path. */
+  var backdropLens = hasBackdrop &&
+                     supports('backdrop-filter', 'url(#x) blur(1px)') &&
+                     !isWebKit && !isGecko;
+
+  /* Everywhere else: the same filter, over a copy of the backdrop. The plain
+     `filter` property has never had the bug -- feImage feeding
+     feDisplacementMap renders correctly in WebKit through it (measured on the
+     same Safari 26.5 that drops it from backdrop-filter), so the maps built
+     above are usable as they stand; only what they are pointed AT changes. */
+  var copyLens = !backdropLens &&
+                 supports('filter', 'url(#x)') &&
+                 'attachShadow' in Element.prototype &&
+                 !!window.Promise;
+
+  var canLens = backdropLens || copyLens;
 
   var defs = null;
   function ensureDefs() {
@@ -1156,6 +1208,36 @@
      each long edge of a 94px bar) -- so the nav is unchanged by moving to real
      units, and everything else on the site now matches it. */
   var GLASS = { profile: 'squircle', bezel: 40, thickness: 66, gap: 12, ior: 1.5 };
+
+  /* ---- A THICKER SHEET FOR THE COPY PATH WAS TRIED, AND IT DOES NOTHING --
+     The reasoning was sound: WebKit's fold arrives softer because it is a copy
+     under a surface that tints and frosts over it, so give the copy thicker
+     glass -- more thickness, more gap, a higher ior -- and let the solver
+     produce a bigger offset out of the physics rather than a magic multiplier.
+
+     It was built and measured. feDisplacementMap's scale went from 88.2 to
+     223.6, the filter region grew to match, and the rendered bar did not
+     change by one pixel. Zoomed to the cap, the before and after are the same
+     image.
+
+     What the measurement then showed is why. Comparing the bar with the lens
+     against the same bar with the reference removed -- two fresh loads, no
+     runtime mutation -- the difference lands at 4.79 in the MIDDLE of the bar
+     against 3.45 and 2.67 at the caps. A refraction lens acts at the rim; this
+     acts hardest where the glass is flattest, which is the signature of the
+     chain's tone primitives (the saturate, the brightness lift, the specular
+     blend) rendering while the displacement does not.
+
+     So on the copy path feDisplacementMap is not displacing -- most likely its
+     feImage map never arrives, since in2 resolving to nothing yields a
+     pass-through rather than an error. Raising the scale of a displacement
+     that is not happening cannot help, which is exactly what was observed.
+
+     The edge in Safari is carried by the mirrored bands in the copy instead --
+     real content folded about the bar's edge, which needs no displacement map
+     at all. Do not re-tune GLASS for the copy path without first re-checking
+     that in2 actually arrives; the optional-sheet parameter this note used to
+     describe was removed, because nothing passed one. */
 
   /* ---- THE SAME EDGE, FOR SURFACES THAT CANNOT CARRY A FILTER ----------
      Buttons and chips sit on the flat page, where a displacement lens returns
@@ -1237,28 +1319,50 @@
      saving. Left uncapped, the hero panel alone is a ~1000x780 map built twice
      over with four SDF evaluations a pixel -- about six million of them, on
      the main thread, during scroll. */
-  var MAP_MAX = 420;
+  /* Budgeted by AREA, which is what the build actually costs -- the loop in
+     buildMaps runs once per map pixel -- rather than by the long edge, which
+     is not a cost at all. Capping the long edge punished exactly the wrong
+     shapes: the nav is 1216x94, which is 114k pixels, comfortably inside any
+     sane budget, and the old rule still built it at 0.6 scale and stretched
+     it back 1.67x.
+
+     That stretch is where Chromium and WebKit stopped agreeing. feImage
+     resamples the map to the filter region, and the two engines do not
+     resample it the same way -- measured on this bar's own filter, rendered
+     from the same maps in both engines: identical mean, but Chromium came out
+     with 35% more contrast and WebKit with visible extra oscillation across
+     the fold, i.e. one engine interpolating the stretched map smoothly and
+     the other stepping through it. Neither is wrong; the stretch is what
+     invited the difference.
+
+     Every surface this site actually lenses now falls inside the budget and is
+     built 1:1, so there is no resample left to disagree about, and the banding
+     the floor below exists to hide does not arise in the first place. The
+     budget still catches anything genuinely large before it becomes a
+     six-million-pixel build on the main thread. */
+  var MAP_MAX_PIXELS = 240000;
   /* the bezel is never allowed to be resolved by fewer than this many pixels */
   var MIN_BEZEL_PX = 24;
 
   function lensFor(w, h, radius) {
+    var g = GLASS;
     var key = Math.round(w) + 'x' + Math.round(h) + 'r' + Math.round(radius);
     if (filters[key]) return filters[key];
 
-    /* Capping the long edge alone quietly wrecked the thin surfaces: the nav
-       is 1216x94, so MAP_MAX/1216 built its map at 420x32 and stretched it
-       back nearly 3x. A 40px bezel came out of that as 14 map pixels smeared
-       over 40 real ones, which is visible as banding across the edge -- the
-       exact thing the pre-blur exists to hide, reintroduced by the cap meant
-       to make it cheap. So the scale also has a FLOOR: whatever else happens,
-       the bezel keeps enough pixels to be a gradient rather than a staircase. */
-    var ms = Math.min(1, MAP_MAX / Math.max(w, h));
-    var floor = Math.min(1, MIN_BEZEL_PX / GLASS.bezel);
+    /* Scaled down only if the map would actually be expensive, and uniformly
+       when it is -- scaling x and y by different factors would give the shape
+       a different bezel width on its long side than on its short one, which is
+       a distortion rather than a saving. The floor is kept underneath: if a
+       surface ever is big enough to be scaled, its bezel still has to survive
+       as a gradient rather than a staircase. */
+    var ms = 1;
+    if (w * h > MAP_MAX_PIXELS) ms = Math.sqrt(MAP_MAX_PIXELS / (w * h));
+    var floor = Math.min(1, MIN_BEZEL_PX / g.bezel);
     if (ms < floor) ms = floor;
     var mw = Math.max(2, Math.round(w * ms)), mh = Math.max(2, Math.round(h * ms));
     var geo = {
-      profile: GLASS.profile, ior: GLASS.ior,
-      bezel: GLASS.bezel * ms, thickness: GLASS.thickness * ms, gap: GLASS.gap * ms
+      profile: g.profile, ior: g.ior,
+      bezel: g.bezel * ms, thickness: g.thickness * ms, gap: g.gap * ms
     };
     var lim = Math.min(mw, mh) / 2 - 1;
     if (geo.bezel > lim) geo.bezel = lim;
@@ -1322,6 +1426,508 @@
     return filters[key];
   }
 
+  /* ======================================================================
+     THE SAME LENS, WHERE THE BACKDROP CANNOT CARRY ONE
+     ----------------------------------------------------------------------
+     WebKit will not run an SVG filter over a live backdrop. It will run one
+     over ordinary content all day. So the fix is not a different effect, it is
+     a different SUBJECT: stop filtering the backdrop, and filter a copy of it.
+
+     A copy of the page is laid out behind each piece of glass, translated so
+     it sits exactly where the real page sits, clipped to the glass's own
+     rounded rect, and the filter built above -- the same maps, the same
+     Snell's-law bend, the same specular rim -- is put on it through the plain
+     `filter` property. The glass itself keeps its tint, its border and its
+     shadow and stops carrying a backdrop-filter, because everything its
+     backdrop-filter would have blurred is now sitting in the copy directly
+     underneath. What comes out is the same composite in the same order.
+
+     Three things make this safe rather than a duplicate-DOM disaster:
+
+     IT LIVES IN A CLOSED SHADOW ROOT. The copy carries the page's own ids,
+     classes and structure -- it has to, or the stylesheet would not style it.
+     In the light DOM that would be poison: this page runs
+     document.querySelectorAll('.section--dark, .hero, .page-hero') on every
+     scroll to decide whether the nav is over a dark section, and a second set
+     of those elements parked at the nav's own coordinates would flip the
+     theme at random. Behind a closed shadow root the page's own JS cannot
+     reach the copy at all, getElementById keeps returning the real element,
+     and a #fragment link still lands on the real section.
+
+     THE STYLESHEET IS ADOPTED, NOT REFETCHED. One constructed CSSStyleSheet,
+     parsed once, shared by every copy on the page. Custom properties still
+     inherit in through the host, so the copy picks up the same theme tokens
+     the real page is using.
+
+     ONLY THE CONTENT IS COPIED. Everything position:fixed is chrome -- the
+     nav, the mobile bar, the back button, the accessibility panel -- and none
+     of it is behind the glass, so none of it is cloned. What is left is
+     <main> and the footer: the things that actually scroll under the bar.
+
+     It is not free. This is a second render pass over the page's content,
+     clipped to a bar-sized window, re-filtered whenever it moves. Paint
+     containment holds the cost to that window rather than the document, and
+     scrolling writes two custom properties per surface per frame and reads no
+     layout at all -- every lensed surface here is position:fixed, so its rect
+     only changes when the page reflows.
+     ====================================================================== */
+
+  /* Inside the shadow root only. Deliberately odd class names: adopted sheets
+     are applied alongside these, and a page rule for a plain `.doc` would
+     otherwise be free to move the copy. */
+  var COPY_SHADOW_CSS =
+    /* No filter here. It is worn by the HOST, in the light DOM -- see the note
+       on .lg-refract in the stylesheet. This layer is now just the window. */
+    '.lg-lens-layer{position:absolute;inset:0;}' +
+
+    /* ---- THE FOLDED EDGE ----
+       WebKit will not refract a backdrop, and feDisplacementMap does not
+       displace on this copy (measured). But the copy IS the page, as real
+       elements -- so the fold can be built out of it directly instead of
+       filtered into existence: a narrow window onto the same content, mirrored
+       about the bar's own edge, so what sits just OUTSIDE the bar is folded
+       back INSIDE it. That is the part of refraction the eye actually reads,
+       and it is what a gradient could never fake.
+
+       Both bands use transform-origin 0 0 and compose the mirror explicitly.
+       Left:   x_page -> -s * (x_page - barLeft)
+       Right:  x_page -> band - s * (x_page - barRight)
+       so the right band pre-translates by the band width rather than leaning
+       on a percentage origin, which would resolve against the COPY's width
+       (the whole page) rather than against the band. */
+    '.lg-edge{position:absolute;top:0;height:100%;width:var(--lg-band,26px);' +
+      'overflow:hidden;pointer-events:none;z-index:2;opacity:var(--lg-fold,.5);}' +
+    '.lg-edge.l{left:0;-webkit-mask-image:linear-gradient(to right,#000 0,#000 58%,transparent 100%);' +
+      'mask-image:linear-gradient(to right,#000 0,#000 58%,transparent 100%);}' +
+    '.lg-edge.r{right:0;-webkit-mask-image:linear-gradient(to left,#000 0,#000 58%,transparent 100%);' +
+      'mask-image:linear-gradient(to left,#000 0,#000 58%,transparent 100%);}' +
+    '.lg-edge .m{position:absolute;top:0;left:0;transform-origin:0 0;' +
+      'filter:url(#lgDisperse);background:var(--bg-page,#fcf9f3);}' +
+    '.lg-edge.l .m{transform:scaleX(calc(-1 * var(--lg-sq,.78)))' +
+      ' translate(var(--lg-lx,0px),var(--lg-ey,0px));}' +
+    '.lg-edge.r .m{transform:translateX(var(--lg-band,26px))' +
+      ' scaleX(calc(-1 * var(--lg-sq,.78))) translate(var(--lg-rx,0px),var(--lg-ey,0px));}' +
+    '.lg-doc-layer{position:absolute;top:0;left:0;transform-origin:0 0;' +
+      /* 2D on purpose: translate3d would promote a layer the size of the whole
+         document, and the only thing that needs rasterising is the window the
+         host clips to. */
+      'transform:translate(var(--lg-dx,0px),var(--lg-dy,0px));' +
+      'background:var(--bg-page,#fcf9f3);}' +
+    /* `body > footer` cannot match inside a shadow tree, and it is the rule
+       that gives the footer its ground. Restored here so the copy does not
+       show a transparent band where the footer starts. */
+    '.lg-doc-layer > footer{background:var(--bg-page,#fcf9f3);}' +
+
+    /* ---- THE COPY HAS TO SCROLL ON THE COMPOSITOR ----
+       This is the one place where "the same filter, on a copy" stops being
+       automatically identical to the real thing, and it is the difference you
+       would actually see next to Chromium.
+
+       A backdrop-filter has no synchronisation problem: the backdrop IS the
+       page, so it cannot be out of step with it. A copy can. Safari scrolls
+       asynchronously -- the page moves on the compositor while the main thread
+       catches up -- so a copy translated from a scroll handler arrives late,
+       and on a flick it arrives visibly late: the bar shows a slice of page
+       that is a few frames behind the page it is sitting on, and the glass
+       looks like it is sliding rather than sitting still.
+
+       Driving the translate from a scroll-driven animation instead hands the
+       whole thing to the compositor, where the scroll already is. The keyframes
+       are the same expression the fallback computes by hand -- at scroll
+       progress p the copy sits at -(rect.top) - p * range -- so the two paths
+       agree exactly; one is just interpolated somewhere that cannot lag.
+
+       The rAF path below stays for engines without scroll timelines. */
+    '@supports (animation-timeline: scroll()){' +
+      '@keyframes lg-track{' +
+        'from{transform:translate(var(--lg-dx,0px),var(--lg-dy0,0px));}' +
+        'to{transform:translate(var(--lg-dx,0px),calc(var(--lg-dy0,0px) - var(--lg-range,0px)));}' +
+      '}' +
+      ':host(.lg-pinned) .lg-doc-layer{animation-name:lg-track;animation-duration:auto;' +
+        'animation-timing-function:linear;animation-fill-mode:both;' +
+        'animation-timeline:scroll(root block);}' +
+    '}';
+
+  /* whether that @supports block above is live -- the rAF tracker stands down
+     when it is, rather than fighting the compositor for the same property */
+  var scrollTimeline = supports('animation-timeline', 'scroll()');
+
+  /* below this the folded edge stands down: see mount() */
+  var FOLD_MIN_WIDTH = 900;
+
+  var COPY_SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, TEMPLATE: 1, NOSCRIPT: 1, META: 1, DIALOG: 1 };
+
+  /* What is actually behind the glass: body's children, minus the chrome.
+     Tested by computed position rather than by a list of selectors, so a new
+     fixed widget is excluded by being fixed rather than by being remembered. */
+  function contentRoots() {
+    var out = [], kids = document.body.children, i, el, pos;
+    for (i = 0; i < kids.length; i++) {
+      el = kids[i];
+      if (el.__lgCopyHost) continue;
+      if (COPY_SKIP[el.tagName]) continue;
+      if (el.classList && el.classList.contains('lg-defs')) continue;
+      pos = getComputedStyle(el).position;
+      if (pos === 'fixed' || pos === 'sticky') continue;
+      out.push(el);
+    }
+    return out;
+  }
+
+  /* ---- ONE SHEET, AND NOT ONE REQUEST ----------------------------------
+     The copy carries the page's own markup, so it needs the page's own CSS or
+     it renders as unstyled HTML. The obvious way to get it is to fetch the
+     stylesheet again. That was a mistake, and a visible one.
+
+     The browser has ALREADY parsed that stylesheet -- it is sitting in
+     document.styleSheets, rules and all -- so asking the server for it a
+     second time is a request for something we are holding. Worse, it is a
+     request some servers will not answer: JetBrains' built-in server (the one
+     behind localhost:63342) rejects anything arriving without its _ijt token,
+     so the fetch came back unauthorized, the copy had no styles, and because
+     .lg-copy had already taken the backdrop-filter off the bar, the nav lost
+     its frost with nothing put in its place. That is exactly the "Safari looks
+     different from Chrome" in the screenshots: not a worse lens, no lens and
+     no frost either.
+
+     So the rules are read straight out of the parsed sheet. No request, no
+     token, no dev-server policy to satisfy, and it is instant.
+
+     One correction is needed on the way out. cssText serialises url() exactly
+     as it was written -- "../img/hero-bg.webp" -- and a constructed sheet
+     resolves relative URLs against the DOCUMENT, not against the file the rule
+     came from, so every background image would 404 one directory up. Each
+     sheet's rules are therefore rebased onto that sheet's own href. */
+  var sheetReady = null;
+
+  function absolutise(css, base) {
+    if (!base) return css;
+    return css.replace(
+      /url\((\s*['"]?)((?!data:|https?:|blob:|\/\/|#)[^'")]+?)(['"]?\s*)\)/g,
+      function (m, pre, u, post) {
+        try { return 'url(' + pre + new URL(u, base).href + post + ')'; }
+        catch (e) { return m; }
+      });
+  }
+
+  function readParsedCSS() {
+    var out = '', sheets = document.styleSheets, i, j, rules;
+    for (i = 0; i < sheets.length; i++) {
+      rules = null;
+      /* cross-origin sheets (the font CDN) throw here; they carry @font-face
+         only, and font faces resolve at document level anyway */
+      try { rules = sheets[i].cssRules; } catch (e) { rules = null; }
+      if (!rules) continue;
+      var text = '';
+      for (j = 0; j < rules.length; j++) text += rules[j].cssText + '\n';
+      out += absolutise(text, sheets[i].href || document.baseURI);
+    }
+    return out;
+  }
+
+  function pageStyleLinks() {
+    return [].slice.call(document.querySelectorAll('link[rel="stylesheet"]'))
+      .filter(function (l) { return l.href && l.href.lastIndexOf(location.origin, 0) === 0; });
+  }
+
+  function copySheet() {
+    if (sheetReady) return sheetReady;
+
+    var constructable = typeof CSSStyleSheet === 'function' &&
+                        CSSStyleSheet.prototype.replaceSync &&
+                        ('adoptedStyleSheets' in document);
+    if (!constructable) { sheetReady = Promise.resolve(null); return sheetReady; }
+
+    function build(text) {
+      if (!text) return null;
+      try { var sh = new CSSStyleSheet(); sh.replaceSync(text); return sh; }
+      catch (e) { return null; }
+    }
+
+    var direct = build(readParsedCSS());
+    if (direct) { sheetReady = Promise.resolve(direct); return sheetReady; }
+
+    /* Only if the rules could not be read at all -- a sheet still loading, or
+       one the engine will not expose. Kept as a second chance rather than a
+       first choice, for every reason in the note above. */
+    var links = pageStyleLinks();
+    if (!links.length || !window.fetch) { sheetReady = Promise.resolve(null); return sheetReady; }
+    sheetReady = Promise.all(links.map(function (l) {
+      return fetch(l.href, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (t) { return absolutise(t, l.href); })
+        .catch(function () { return ''; });
+    })).then(function (parts) { return build(parts.join('\n')); })
+      .catch(function () { return null; });
+    return sheetReady;
+  }
+
+  function CopyLens(surface) {
+    this.s = surface;
+    this.host = null; this.sh = null; this.doc = null; this.edocs = [];
+    this.rect = null; this.rad = 0; this.filled = false; this.ready = false;
+  }
+
+  CopyLens.prototype.mount = function () {
+    if (this.host) return;
+    var host = document.createElement('div');
+    host.className = 'lg-refract';
+    /* aria-hidden is not enough on its own. The copy is a real subtree with
+       real links in it, and shadow content is focusable and selectable like
+       any other: without `inert` the reader would tab through every link on
+       the page a second time, invisibly, from inside the nav bar. `inert` also
+       takes it out of find-in-page, which aria-hidden does not. */
+    host.setAttribute('aria-hidden', 'true');
+    if ('inert' in HTMLElement.prototype) host.inert = true;
+    else host.setAttribute('inert', '');
+    host.__lgCopyHost = true;
+    /* Appended at the END of body, never inside the surface. The copy carries
+       duplicate ids; getElementById and fragment navigation both resolve to
+       the FIRST match in tree order, so the real element has to come first. */
+    document.body.appendChild(host);
+
+    var sh = host.attachShadow({ mode: 'closed' });
+    /* Chromatic dispersion for the folded edge. Real glass splits wavelengths
+       at a steep edge -- blue has the higher index and bends further -- so the
+       channels are separated, displaced by different amounts and screened back
+       together. The split happens INSIDE the filter, so the band still costs
+       one copy rather than three. Safe in a shadow tree: feColorMatrix,
+       feOffset and feBlend all render here; feImage is the one that does not,
+       and this chain has none. */
+    sh.appendChild((function () {
+      var NS = 'http://www.w3.org/2000/svg';
+      var svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('width', '0'); svg.setAttribute('height', '0');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+      svg.innerHTML =
+        '<filter id="lgDisperse" x="-20%" y="-20%" width="140%" height="140%"' +
+        ' color-interpolation-filters="sRGB">' +
+        '<feColorMatrix result="R" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/>' +
+        '<feOffset in="R" dx="-1.5" result="Ro"/>' +
+        '<feColorMatrix result="G" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"/>' +
+        '<feColorMatrix result="B" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/>' +
+        '<feOffset in="B" dx="1.8" result="Bo"/>' +
+        '<feBlend in="Ro" in2="G" mode="screen" result="RG"/>' +
+        '<feBlend in="RG" in2="Bo" mode="screen"/></filter>';
+      return svg;
+    })());
+    var style = document.createElement('style');
+    style.textContent = COPY_SHADOW_CSS;
+    sh.appendChild(style);
+    var lens = document.createElement('div');
+    lens.className = 'lg-lens-layer';
+    var doc = document.createElement('div');
+    doc.className = 'lg-doc-layer';
+    lens.appendChild(doc);
+    sh.appendChild(lens);
+
+    /* The folded edges. Gated by width: each band is a third copy of the page,
+       and the phone is both where that cost lands hardest and where the caps
+       are smallest -- so narrow screens keep the cheap painted fold and only
+       wider ones pay for the real one. */
+    this.edocs = [];
+    if (document.documentElement.clientWidth >= FOLD_MIN_WIDTH) {
+      ['l', 'r'].forEach(function (side) {
+        var band = document.createElement('div');
+        band.className = 'lg-edge ' + side;
+        var m = document.createElement('div');
+        m.className = 'm';
+        band.appendChild(m);
+        sh.appendChild(band);
+        this.edocs.push(m);
+      }, this);
+      /* Tell the stylesheet the real fold is here, so the painted one can
+         stand down. Two edge treatments on one cap is not twice the glass --
+         it is a gradient sitting on top of a mirror, washing out the thing it
+         was only ever standing in for. */
+      this.s.el.classList.add('lg-fold');
+    }
+
+    this.host = host; this.sh = sh; this.doc = doc;
+
+    /* ---- THE FROST DOES NOT COME OFF UNTIL THE COPY IS REALLY THERE ----
+       .lg-copy turns the surface's backdrop-filter off, on the promise that
+       the copy underneath is about to do that job instead. Adding it before
+       that is true is how the bar ended up with no frost AND no lens. So the
+       class is applied HERE, in the callback, and only once the page's own
+       rules are actually adopted into this shadow root -- and if they cannot
+       be, the whole path stands down and the surface keeps the material it
+       already had. Unstyled content behind glass is worse than no glass. */
+    host.style.visibility = 'hidden';
+    var self = this;
+    copySheet().then(function (sheet) {
+      if (!self.sh) return;
+      var adopted = false;
+      if (sheet) {
+        try { self.sh.adoptedStyleSheets = [sheet]; adopted = true; } catch (e) { adopted = false; }
+      }
+      if (!adopted) { self.giveUp(); return; }
+      self.ready = true;
+      self.host.style.visibility = '';
+      self.s.el.classList.add('lg-copy');
+    });
+  };
+
+  /* No stylesheet, no copy -- and no copy means this engine has no working
+     lens at all, which is a bigger statement than it looks. .lg-copy coming
+     off restores the backdrop-filter, but .lg-lensed ALSO switches the painted
+     sheen off and dims the conic rim, on the grounds that the filter's own
+     specular map has replaced them. With no filter anywhere, that trade is the
+     original bug in a new place, so both classes go and canLens is retracted:
+     the surface goes back to the frost and the hand-painted highlights, which
+     is a material that has always looked right here.
+
+     The whole mechanism stands down together rather than leaving one surface
+     half-converted -- the sheet is shared, so if one copy cannot have it none
+     of them can. */
+  CopyLens.prototype.giveUp = function () {
+    copyLens = false;
+    canLens = false;
+    for (var i = 0; i < surfaces.length; i++) {
+      var su = surfaces[i];
+      su.el.classList.remove('lg-copy');
+      su.el.classList.remove('lg-lensed');
+      if (su.cp) { su.cp.destroy(); su.cp = null; }
+    }
+  };
+
+  /* The clone. Rebuilt rather than diffed: it is a few hundred nodes on this
+     site, it happens on a debounce, and a MutationObserver mirror is a great
+     deal of machinery to keep a decoration honest. */
+  CopyLens.prototype.fill = function () {
+    if (!this.doc) return;
+    var roots = contentRoots(), i, j;
+    var targets = [this.doc].concat(this.edocs || []);
+    var vw = document.documentElement.clientWidth;
+    for (j = 0; j < targets.length; j++) {
+      var d = targets[j];
+      while (d.firstChild) d.removeChild(d.firstChild);
+      for (i = 0; i < roots.length; i++) d.appendChild(roots[i].cloneNode(true));
+      d.style.width = vw + 'px';
+    }
+    this.filled = true;
+  };
+
+  /* ---- WHY THE FILTER IS NOT IN HERE ------------------------------------
+     The first fix for Safari was to clone the <filter> into this shadow root,
+     on the reasoning that a fragment-only url() reference resolves in the tree
+     scope of the element wearing it -- which is true, and measurable: with the
+     filter in document.body and the lens layer in here, the reference resolved
+     against a tree that has no such id and found nothing.
+
+     Cloning it in did make the reference resolve, and the lens was still dead.
+     Measured in both engines: an feImage-driven filter that is DEFINED AND
+     APPLIED inside a shadow tree renders nothing at all. feImage is the one
+     primitive that does not survive the boundary, and the whole lens is built
+     on it -- feImage carries the displacement and specular maps.
+
+     So the subject moves instead of the filter. The filter stays in the
+     document where feImage works, and it is applied to the HOST -- which is a
+     light-DOM element, so the id is in scope -- rather than to a layer inside.
+     A filter on the host filters everything the host draws, shadow content
+     included, so the copy is filtered exactly as before.
+
+     It is better in two other ways, both of which were real problems. The host
+     is `overflow:hidden` and clipped to the glass's rounded rect, so the
+     filter's source graphic is now a bar-sized slice instead of the entire
+     cloned page: this lens layer had `overflow:visible` wrapped around a
+     10,679px-tall copy of the document, which made the source 32 megapixels at
+     2x for an 83px bar. And there is nothing left to keep in sync, so a
+     surface that reflows onto a new filter cannot go stale. */
+
+  /* Everything that changes only when the page reflows. */
+  CopyLens.prototype.place = function (rad) {
+    if (!this.host) return;
+    var el = this.s.el, r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    var host = this.host, z = parseInt(cs.zIndex, 10);
+    if (rad != null) this.rad = rad;
+    host.style.left = r.left + 'px';
+    host.style.top = r.top + 'px';
+    host.style.width = r.width + 'px';
+    host.style.height = r.height + 'px';
+    host.style.borderRadius = this.rad + 'px';
+    /* directly beneath its own surface, and above whatever the surface floats
+       over -- which is what a backdrop is */
+    if (isNaN(z)) {
+      /* a surface carrying no z-index of its own cannot be undercut by
+         arithmetic, so the copy moves to sit immediately before it instead and
+         document order decides */
+      host.style.removeProperty('z-index');
+      if (host.nextSibling !== el && el.parentNode) el.parentNode.insertBefore(host, el);
+    } else {
+      host.style.zIndex = z - 1;
+    }
+    /* the shadow CSS only tracks scrolling for a surface that stays put while
+       the page moves under it -- see the keyframes */
+    host.classList.add('lg-pinned');
+    /* The reference is rebuilt from the id rather than copied across from the
+       surface's computed value, because that value is not the string that was
+       put in: WebKit serialises url(#lgLens1) back out as url(\#lgLens1). The
+       escape is legal and resolves to the same fragment, but round-tripping a
+       serialisation is not something to rely on for the one declaration the
+       whole effect hangs off.
+
+       The computed value is still READ, for the one thing it is authoritative
+       about: the accessibility panel's opacity step replaces the reference
+       outright through a stylesheet rule, and the copy has to honour that the
+       same way the backdrop path does. */
+    var declared = cs.getPropertyValue('--lg-url').trim();
+    /* A dangling reference does not degrade to "frost without the bend" -- it
+       degrades to no filter at all, blur included. So the reference is written
+       only once the filter is really in this tree, and if it could not be
+       cloned the copy falls back to opacity(1): a no-op filter function that
+       leaves the blur and the saturate standing. */
+    var wantsLens = declared.indexOf('url(') === 0;
+    var useLens = wantsLens && !!this.s.lensId &&
+                  !!(defs && defs.querySelector('#' + this.s.lensId));
+    host.style.setProperty('--lg-url',
+      useLens ? 'url(#' + this.s.lensId + ')'
+              : (wantsLens ? 'opacity(1)' : (declared || 'opacity(1)')));
+    host.style.setProperty('--lg-copy-frost', cs.getPropertyValue('--lg-copy-frost').trim() || '6px');
+    host.style.setProperty('--lg-copy-sat', cs.getPropertyValue('--lg-copy-sat').trim() || '180%');
+    this.rect = { left: r.left, top: r.top, right: r.right };
+    /* the two constants the scroll-driven keyframes interpolate between:
+       where the copy sits at scroll 0, and how far the document can scroll */
+    host.style.setProperty('--lg-dy0', -r.top + 'px');
+    host.style.setProperty('--lg-range',
+      Math.max(0, document.documentElement.scrollHeight -
+                  document.documentElement.clientHeight) + 'px');
+    this.track();
+  };
+
+  /* Everything that changes on scroll: two custom properties, no layout read.
+     Document point (0,0) has to land at viewport (-scrollX, -scrollY), and the
+     layer's own origin is already at the surface's top-left corner. */
+  CopyLens.prototype.track = function () {
+    if (!this.host || !this.rect) return;
+    /* horizontal is written either way: the keyframes read --lg-dx too, and a
+       page that scrolls sideways is rare enough not to earn a second timeline */
+    this.host.style.setProperty('--lg-dx', -(this.rect.left + window.pageXOffset) + 'px');
+    /* the folds are not on the scroll timeline -- they are two narrow strips
+       rather than a document-tall layer, so a property write per frame is
+       cheaper than a second and third compositor animation */
+    if (this.edocs && this.edocs.length) {
+      var sx = window.pageXOffset, sy = window.pageYOffset;
+      this.host.style.setProperty('--lg-lx', -(this.rect.left + sx) + 'px');
+      this.host.style.setProperty('--lg-rx', -(this.rect.right + sx) + 'px');
+      this.host.style.setProperty('--lg-ey', -(this.rect.top + sy) + 'px');
+    }
+    if (scrollTimeline) return;
+    this.host.style.setProperty('--lg-dy', -(this.rect.top + window.pageYOffset) + 'px');
+  };
+
+  CopyLens.prototype.show = function (on) {
+    if (this.host) this.host.style.display = on ? '' : 'none';
+  };
+
+  CopyLens.prototype.destroy = function () {
+    if (this.host && this.host.parentNode) this.host.parentNode.removeChild(this.host);
+    if (this.s && this.s.el) this.s.el.classList.remove('lg-fold');
+    this.host = this.sh = this.doc = null; this.edocs = [];
+    this.rect = null; this.filled = false; this.ready = false;
+  };
+
   /* ---- A LENSED SURFACE -------------------------------------------------
      Holds no maps of its own. It measures itself, asks the cache for a filter
      that fits, and writes the reference into a custom property the stylesheet
@@ -1337,7 +1943,9 @@
 
   Surface.prototype.clear = function () {
     this.el.classList.remove('lg-lensed');
+    this.el.classList.remove('lg-copy');
     this.el.style.removeProperty('--lg-url');
+    if (this.cp) { this.cp.destroy(); this.cp = null; }
     this.w = this.h = 0;
   };
 
@@ -1368,9 +1976,52 @@
       if (!lens) return;
       self.w = w2; self.h = h2;
       self.el.style.setProperty('--lg-url', 'url(#' + lens.id + ')');
+      self.lensId = lens.id;
       self.el.classList.add('lg-lensed');
+      /* Chromium stops here -- the class above is the whole delivery. Where the
+         backdrop cannot carry the filter, the copy underneath does, and it has
+         to be built AFTER .lg-lensed is on the element: the frost and
+         saturation it reads are declared by the .lg-lensed rules. */
+      if (copyLens) self.recopy(rad);
       if (self.o.gc !== false) gcFilters();
     });
+  };
+
+  /* Mounts the copy on first use, then keeps it aligned. `full` re-clones the
+     page; without it this is a reposition, which is all a resize needs. */
+  Surface.prototype.recopy = function (rad, full) {
+    if (!copyLens || !stillLens()) return;
+
+    /* ---- ONLY WHAT ACTUALLY FLOATS ----
+       A copied backdrop is mounted BEHIND its surface, and "behind" is only a
+       place you can reach if the surface floats above the page rather than
+       sitting in it. `.page-back` on the subpages turns out to be a static,
+       in-flow link -- the register was written believing it floated -- and for
+       an in-flow surface this mechanism is both unreachable and pointless:
+       unreachable because getting the copy between the section's background
+       and the link means reaching into a stacking context this decoration has
+       no business touching, and pointless because a surface that scrolls WITH
+       the page never moves relative to what is behind it, so there is nothing
+       back there but the flat ground it is already sitting on.
+
+       Which is the register's own first test arriving a second time: is there
+       anything behind it worth bending? For an in-flow chip on a solid band,
+       no. It keeps its frost and its painted rim, which is what reads at that
+       size anyway. */
+    var pos = getComputedStyle(this.el).position;
+    if (pos !== 'fixed' && pos !== 'sticky') {
+      if (this.cp) { this.cp.destroy(); this.cp = null; }
+      this.el.classList.remove('lg-copy');
+      return;
+    }
+
+    if (!this.cp) this.cp = new CopyLens(this);
+    this.cp.mount();
+    if (full || !this.cp.filled) this.cp.fill();
+    this.cp.place(rad);
+    this.cp.show(true);
+    /* not added here -- mount() adds it once the stylesheet is adopted */
+    if (this.cp.ready) this.el.classList.add('lg-copy');
   };
 
   /* ---- THE REGISTER -----------------------------------------------------
@@ -1850,6 +2501,59 @@
   refreshLens();
   window.addEventListener('resize', refreshLens);
   window.addEventListener('load', refreshLens);
+
+  /* ---- keeping the copies honest ----
+     Only on the engines that have one. Three things can put a copy out of
+     step, and they cost three different amounts:
+
+       SCROLL    nothing at all where scroll timelines exist -- the keyframes
+                 in the shadow CSS are already tracking it on the compositor.
+                 The rAF tracker below is only for engines without them.
+       REFLOW    the copy is laid out at the viewport's width, so a resize
+                 re-clones; refreshLens has already remeasured the surfaces by
+                 then, and a surface whose box did not change would otherwise
+                 never be told.
+       CONTENT   a tab switching panels, a lightbox opening, anything that
+                 changes what is actually under the bar. Debounced hard: this
+                 re-clones, and nothing here is worth a re-clone at 60fps. */
+  if (copyLens && !scrollTimeline) {
+    var trackPending = false;
+    var trackAll = function () {
+      trackPending = false;
+      for (var i = 0; i < surfaces.length; i++) {
+        if (surfaces[i].cp) surfaces[i].cp.track();
+      }
+    };
+    window.addEventListener('scroll', function () {
+      if (trackPending) return;
+      trackPending = true;
+      requestAnimationFrame(trackAll);
+    }, { passive: true });
+  }
+
+  if (copyLens) {
+    var restageTimer = null;
+    var restage = function () {
+      clearTimeout(restageTimer);
+      restageTimer = setTimeout(function () {
+        for (var i = 0; i < surfaces.length; i++) {
+          var s = surfaces[i];
+          if (s.cp && s.cp.host) s.recopy(null, true);
+        }
+      }, 320);
+    };
+    window.addEventListener('resize', restage);
+    window.addEventListener('load', restage);
+
+    if ('MutationObserver' in window) {
+      var contentWatch = new MutationObserver(restage);
+      contentRoots().forEach(function (el) {
+        contentWatch.observe(el, {
+          childList: true, subtree: true, attributes: true, characterData: true
+        });
+      });
+    }
+  }
   if (reduceTransparency.addEventListener) {
     reduceTransparency.addEventListener('change', function () { syncLensClasses(); });
   }
@@ -1865,15 +2569,30 @@
        note where pillGlass is declared), so there is no second class to keep
        in step here. Restored only if the maps actually exist: .w is set once a
        build has succeeded. */
-    var i;
+    var i, s;
     if (!stillLens() || !canLens) {
-      for (i = 0; i < surfaces.length; i++) surfaces[i].el.classList.remove('lg-lensed');
+      for (i = 0; i < surfaces.length; i++) {
+        s = surfaces[i];
+        s.el.classList.remove('lg-lensed');
+        /* the copy is the backdrop in this mode, so it goes with the class --
+           left up, it would keep painting a refracted page under a bar that
+           has been told to stop being transparent */
+        s.el.classList.remove('lg-copy');
+        if (s.cp) s.cp.show(false);
+      }
       return;
     }
     /* restored only where the maps actually exist: .w is set once a build has
        succeeded, and a surface that has never been on screen has none */
     for (i = 0; i < surfaces.length; i++) {
-      if (surfaces[i].w) surfaces[i].el.classList.add('lg-lensed');
+      s = surfaces[i];
+      if (!s.w) continue;
+      s.el.classList.add('lg-lensed');
+      /* Not cp.show() -- a surface whose material was off at load has no copy
+         to show yet, and this is the moment it becomes worth building one.
+         refresh() is forced because the box has not changed size; the filter
+         cache means the rebuild is a lookup. */
+      if (copyLens) s.refresh(true);
     }
   }
   new MutationObserver(syncLensClasses)
