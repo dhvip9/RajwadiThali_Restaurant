@@ -1495,14 +1495,22 @@
        so the right band pre-translates by the band width rather than leaning
        on a percentage origin, which would resolve against the COPY's width
        (the whole page) rather than against the band. */
+    /* The dispersion goes HERE, on the band, not on the copy inside it. It was
+       on the copy first, and the copy's box is the whole cloned page -- so the
+       filter was being asked to rasterise a ~998x8173 surface three times over
+       (once per channel) to tint a 26px strip. WebKit did not fail loudly; it
+       degraded the result into a flat pink wash across the entire band, on
+       both caps. Moving it onto the band gives the filter a 26x94 source and
+       the fringe lands where a fringe belongs. */
     '.lg-edge{position:absolute;top:0;height:100%;width:var(--lg-band,26px);' +
-      'overflow:hidden;pointer-events:none;z-index:2;opacity:var(--lg-fold,.5);}' +
+      'overflow:hidden;pointer-events:none;z-index:2;opacity:var(--lg-fold,.5);' +
+      'filter:url(#lgDisperse);}' +
     '.lg-edge.l{left:0;-webkit-mask-image:linear-gradient(to right,#000 0,#000 58%,transparent 100%);' +
       'mask-image:linear-gradient(to right,#000 0,#000 58%,transparent 100%);}' +
     '.lg-edge.r{right:0;-webkit-mask-image:linear-gradient(to left,#000 0,#000 58%,transparent 100%);' +
       'mask-image:linear-gradient(to left,#000 0,#000 58%,transparent 100%);}' +
     '.lg-edge .m{position:absolute;top:0;left:0;transform-origin:0 0;' +
-      'filter:url(#lgDisperse);background:var(--bg-page,#fcf9f3);}' +
+      'background:var(--bg-page,#fcf9f3);}' +
     '.lg-edge.l .m{transform:scaleX(calc(-1 * var(--lg-sq,.78)))' +
       ' translate(var(--lg-lx,0px),var(--lg-ey,0px));}' +
     '.lg-edge.r .m{transform:translateX(var(--lg-band,26px))' +
@@ -2516,7 +2524,20 @@
        CONTENT   a tab switching panels, a lightbox opening, anything that
                  changes what is actually under the bar. Debounced hard: this
                  re-clones, and nothing here is worth a re-clone at 60fps. */
-  if (copyLens && !scrollTimeline) {
+  /* Registered whenever there is a copy at all, NOT only when the scroll
+     timeline is missing. That `&& !scrollTimeline` was correct while the copy
+     was one document-tall layer: the CSS timeline drove it, so a JS scroll
+     handler would have been duplicated work. The folded edges are not on that
+     timeline -- they are two narrow strips, and the comment in track() says
+     why -- so with the guard in place nothing ever updated them: --lg-ey stayed
+     at its scroll-0 value of -20px forever, and the bands went on mirroring the
+     dark hero from the top of the document onto whatever section the bar had
+     since reached. That is the grey wedge, and it is why it appeared once the
+     page was scrolled to the cream sections.
+
+     track() still refuses to write --lg-dy under a live timeline, so the main
+     layer keeps its compositor animation and only the strips are written here. */
+  if (copyLens) {
     var trackPending = false;
     var trackAll = function () {
       trackPending = false;

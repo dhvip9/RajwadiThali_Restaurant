@@ -31,7 +31,7 @@
    activate, so a bump is the clean way to evict everything at once.
    ========================================================================== */
 
-const CACHE_VERSION = 'v15';
+const CACHE_VERSION = 'v16';
 const SHELL_CACHE = 'rajwadi-shell-' + CACHE_VERSION;
 const RUNTIME_CACHE = 'rajwadi-runtime-' + CACHE_VERSION;
 const OFFLINE_URL = 'offline.html';
