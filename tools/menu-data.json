@@ -1,0 +1,295 @@
+{
+ "thalis": [
+  {
+   "name": "Rajwadi Executive Thali",
+   "price": "$26.99",
+   "per": "per person",
+   "note": "Available in Jain and Vegan option",
+   "items": [
+    "Khaman-Dhokla + Appetizers",
+    "Buttermilk / Chaas",
+    "Gujarati Surti Undhiyu Curry",
+    "Shahi Paneer",
+    "Veg Aloo Curry",
+    "Veg. Curry",
+    "Gujarati Surti Dal",
+    "Gujarati Surti Kadhi",
+    "Steam Rice",
+    "Masala Khichdi",
+    "Fulka Roti",
+    "Puri",
+    "Fresh Dryfruit Srikhand",
+    "Fresh AamRas"
+   ],
+   "extra": "Plus complimentary Unlimited Chaats + Desserts"
+  },
+  {
+   "name": "Rajwadi Platinum Thali",
+   "price": "$24.99",
+   "per": "per person",
+   "note": "Available in Jain and Vegan option",
+   "items": [
+    "Khaman-Dhokla",
+    "Buttermilk / Chaas",
+    "Gujarati Surti Undhiyu Curry",
+    "Shahi Paneer",
+    "Veg Aloo Curry",
+    "Veg. Curry",
+    "Gujarati Surti Dal",
+    "Gujarati Surti Kadhi",
+    "Steam Rice",
+    "Masala Khichdi",
+    "Fulka Roti",
+    "Puri",
+    "Fresh Dryfruit Srikhand",
+    "Fresh AamRas"
+   ],
+   "extra": null
+  },
+  {
+   "name": "Rajwadi Silver Thali",
+   "price": "$20.99",
+   "per": "per person",
+   "note": "Available in Jain and Vegan option · No Undhiyu curry, no Paneer curry, no Puri, no Srikhand",
+   "items": [
+    "Khaman-Dhokla",
+    "Buttermilk / Chaas",
+    "Aloo Curry",
+    "Veg. Curry",
+    "Veg. Curry of the Day",
+    "Gujarati Surti Dal",
+    "Gujarati Surti Kadhi",
+    "Masala Khichdi",
+    "Rice",
+    "Roti",
+    "Fresh AamRas"
+   ],
+   "extra": null
+  }
+ ],
+ "sections": [
+  {
+   "title": "Combo",
+   "items": [
+    [
+     "Chole Bhature",
+     "$17.99",
+     "Extra bhature — $3.99"
+    ],
+    [
+     "Mumbai Pav Bhaji — Amul Butter",
+     "$16.99",
+     "Extra 2 pav / buns — $2.99"
+    ],
+    [
+     "Sarsoon Ka Saag & Makki Roti",
+     "$17.99",
+     "Extra makki roti — $3.99"
+    ]
+   ]
+  },
+  {
+   "title": "Kids Menu",
+   "note": "Small portion size.",
+   "items": [
+    [
+     "Rajwadi AamRas Puri Thali",
+     "$15.99",
+     "Choose 1 curry: Undhiyu, Paneer or Aloo Matar"
+    ],
+    [
+     "Rajwadi Srikhand Puri Thali",
+     "$15.99",
+     "Choose 1 curry: Undhiyu, Paneer or Aloo Matar"
+    ]
+   ]
+  },
+  {
+   "title": "Indian Street Chaats",
+   "items": [
+    [
+     "Gobi Chilli Manchurian",
+     "$15.99",
+     null
+    ],
+    [
+     "Ragda Pattice",
+     "$11.99",
+     null
+    ],
+    [
+     "Aloo Tikki Chaat",
+     "$11.99",
+     null
+    ],
+    [
+     "Fresh Samosa Chaat",
+     "$10.99",
+     null
+    ],
+    [
+     "Stuffed Paneer Pakoda",
+     "$9.99",
+     null
+    ],
+    [
+     "Fresh Kachori Chaat",
+     "$8.99",
+     null
+    ],
+    [
+     "Pani Puri",
+     "$8.99",
+     null
+    ],
+    [
+     "Chatpata Bhel Puri",
+     "$8.99",
+     null
+    ],
+    [
+     "Dahi Sev Papdi Chaat",
+     "$8.99",
+     null
+    ],
+    [
+     "Sev Papdi Chaat",
+     "$8.99",
+     null
+    ],
+    [
+     "Dahi Sev Puri Chaat",
+     "$8.99",
+     null
+    ],
+    [
+     "Sev Puri Chaat",
+     "$8.99",
+     null
+    ],
+    [
+     "Bataka Vada (4 pcs.)",
+     "$8.99",
+     null
+    ],
+    [
+     "Mirchi Bhajia",
+     "$8.99",
+     null
+    ],
+    [
+     "Mix Veg. Pakoda",
+     "$8.99",
+     null
+    ],
+    [
+     "Lilva Kachori (4 pcs.)",
+     "$7.99",
+     null
+    ],
+    [
+     "Khaman-Dhokla",
+     "$6.99",
+     null
+    ],
+    [
+     "Fresh Samosa (2 pcs.)",
+     "$5.99",
+     null
+    ],
+    [
+     "Bombay Vada Pav (1 pc.)",
+     "$5.99",
+     null
+    ]
+   ]
+  },
+  {
+   "title": "Sweets",
+   "items": [
+    [
+     "Fresh Ras Malai (2 pcs.)",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh Gajar Halwa (6 oz.)",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh Srikhand (6 oz.)",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh AamRas (6 oz.)",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh Gulab Jamun (2 pcs.)",
+     "$3.99",
+     null
+    ],
+    [
+     "Fresh Mitha Pan",
+     "$1.99",
+     null
+    ]
+   ]
+  },
+  {
+   "title": "Drinks",
+   "items": [
+    [
+     "Fresh Mango Lassi",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh Buttermilk / Chaas",
+     "$5.99",
+     null
+    ],
+    [
+     "Fresh Aam Panna",
+     "$4.99",
+     null
+    ],
+    [
+     "Fresh Kokum Sharbat",
+     "$4.99",
+     null
+    ],
+    [
+     "Masala Chai",
+     "$3.99",
+     null
+    ],
+    [
+     "Bottled Water / Any Soda",
+     "$2.49",
+     null
+    ]
+   ]
+  }
+ ],
+ "rules": [
+  "Sharing of the Unlimited Thali is not allowed.",
+  "Please do not waste the food.",
+  "TOGO is not allowed and boxes are not provided.",
+  "Any items are subject to change upon availability.",
+  "We add a 15% service / gratuity charge for groups of 5 or more."
+ ],
+ "contact": {
+  "phone": "(510) 896-8976",
+  "addr": "3352 Mowry Ave, Fremont, CA 94538",
+  "hours": [
+   "Mon–Thu 11am–9:30pm",
+   "Fri–Sat 11am–10:30pm",
+   "Sun 11am–10pm"
+  ],
+  "site": "rajwadi-thali.com"
+ }
+}
